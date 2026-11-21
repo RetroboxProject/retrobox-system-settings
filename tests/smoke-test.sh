@@ -117,6 +117,9 @@ grep -q '@DEFAULT_AUDIO_SOURCE@' "${HOME}/.config/retrobox-labwc/rc.xml" || fail
 RULE="${RETROBOX_POLKIT_DIR}/50-retrobox-labwc.rules"
 grep -q "subject.user != \"$(id -un)\"" "${RULE}" && grep -q 'login1.reboot' "${RULE}" && grep -q 'login1.power-off' "${RULE}" || fail "polkit rule wrong"
 grep -q 'manage-units' "${RULE}" && grep -q 'action.lookup("unit") == "retrobox-labwc.service"' "${RULE}" || fail "polkit rule does not cover the service"
+grep -q 'timedate1.set-timezone' "${RULE}" && grep -q 'locale1.set-keyboard' "${RULE}" || fail "polkit rule does not cover the time zone and keyboard"
+grep -q "^system_settings = ${DATA}/bin/retrobox-system-settings\$" "${HOME}/.config/retrobox/retrobox.ini.d/50-labwc.ini" || fail "[core] system_settings not written"
+[[ "$(readlink -- "${HOME}/.local/bin/retrobox-system-settings")" == "${DATA}/bin/retrobox-system-settings" ]] || fail "retrobox-system-settings not linked"
 pass "install renders the service and the config; the profile stays untouched"
 
 # --- 4. the TTY is locked once installed -----------------------------------------------
@@ -369,5 +372,52 @@ PATH="${WORK}/bare" expect_fail "$(command -v bash)" "${ROOT}/libexec/mouse-hide
 grep -q 'wlrctl is not installed' "${WORK}/out" || fail "missing wlrctl not reported"
 grep -q 'libexec/mouse-hide' "${HOME}/.config/retrobox-labwc/autostart" || fail "autostart does not run mouse-hide"
 pass "mouse-hide parks the pointer in the corner, mouse-show centres it"
+
+# --- 12. retrobox-system-settings: the system's time zone and keyboard ----------------------
+SETTINGS="${ROOT}/bin/retrobox-system-settings"
+SYS="${WORK}/system-settings"
+mkdir -p "${SYS}/bin" "${SYS}/zoneinfo/Europe"
+: >"${SYS}/zoneinfo/Europe/Madrid"
+cat >"${SYS}/evdev.lst" <<'LST'
+! model
+  pc105           Generic 105-key PC
+! layout
+  us              English (US)
+  es              Spanish
+! variant
+  dvorak          us: English (Dvorak)
+  winkeys         es: Spanish (Windows)
+! option
+  grp             Switching to another layout
+LST
+printf 'XKBMODEL="pc105"\nXKBLAYOUT="es"\nXKBVARIANT=""\nXKBOPTIONS="grp:alt_shift_toggle"\n' >"${SYS}/keyboard"
+# timedatectl and localectl log their arguments; $DENY makes them refuse like polkit
+for tool in timedatectl localectl; do
+  cat >"${SYS}/bin/${tool}" <<'SH'
+#!/bin/sh
+echo "${0##*/} $*" >>"${SYS_LOG}"
+case "$*" in show*) echo "Europe/Madrid"; exit 0 ;; status) exit 0 ;; esac
+[ -z "${DENY:-}" ] || { echo "Access denied: Interactive authentication required." >&2; exit 1; }
+SH
+  chmod +x "${SYS}/bin/${tool}"
+done
+settings() {
+  SYS_LOG="${SYS}/log" PATH="${SYS}/bin:${PATH}" RETROBOX_ZONEINFO="${SYS}/zoneinfo" \
+    RETROBOX_XKB_RULES="${SYS}/evdev.lst" RETROBOX_KEYBOARD_FILE="${SYS}/keyboard" "${SETTINGS}" "$@"
+}
+export SYS_LOG="${SYS}/log"
+[[ "$(settings timezone get)" == "Europe/Madrid" ]] || fail "timezone get"
+settings timezone set Europe/Madrid || fail "timezone set"
+grep -qx 'timedatectl --no-ask-password set-timezone Europe/Madrid' "${SYS}/log" || fail "timedatectl not called: $(cat "${SYS}/log")"
+[[ "$(settings timezone set Europe/Nowhere)" == "Error: unknown time zone 'Europe/Nowhere'" ]] || fail "unknown zone accepted"
+[[ "$(settings keyboard list-layouts)" == $'us English (US)\nes Spanish' ]] || fail "layouts: $(settings keyboard list-layouts)"
+[[ "$(settings keyboard list-variants es)" == "winkeys Spanish (Windows)" ]] || fail "variants of es"
+[[ "$(settings keyboard get)" == "es none" ]] || fail "keyboard get: $(settings keyboard get)"
+settings keyboard set es winkeys || fail "keyboard set"
+grep -qx 'localectl --no-ask-password set-x11-keymap es pc105 winkeys grp:alt_shift_toggle' "${SYS}/log" || fail "localectl wrong: $(cat "${SYS}/log")"
+[[ "$(settings keyboard set es dvorak)" == "Error: the keyboard layout 'es' has no variant 'dvorak'" ]] || fail "wrong variant accepted"
+out="$(DENY=1 settings keyboard set us)" && fail "a refusal must fail"
+[[ "${out}" == "Error: cannot change the keyboard layout: Access denied: Interactive authentication required. (is the polkit rule of install.sh in place?)" ]] || fail "refusal not explained: ${out}"
+pass "retrobox-system-settings reads and sets the system's time zone and keyboard, and says why it can't"
 
 echo "All smoke tests passed."

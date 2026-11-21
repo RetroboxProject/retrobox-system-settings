@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# retrobox-labwc: installer of the labwc gaming session for minimal systems
+# retrobox-system-settings (formerly retrobox-labwc): installer of the labwc gaming session for minimal systems
 # (Debian netinstall, Arch, ...). It installs no packages: it CHECKS that
 # what the session needs is there and sets up the rest.
 #
@@ -19,13 +19,16 @@
 # enabled at boot, and /etc/polkit-1/rules.d/50-retrobox-labwc.rules, which
 # lets your user start and stop that service, power off and reboot from any
 # session (so ssh and the systemctl reboot/poweroff sent by EmulationStation
-# need no password). Pass --no-system to leave /etc alone, or --no-polkit to
+# need no password), and set the system's time zone and keyboard layout
+# (retrobox-system-settings). Pass --no-system to leave /etc alone, or --no-polkit to
 # skip just the rule.
 #
 # It sets up, in your home only:
 #   * ~/.local/share/retrobox-labwc    this tree (so the checkout can go)
 #   * ~/.config/retrobox-labwc         labwc's config for the session
-#   * ~/.config/retrobox/retrobox.ini.d/50-labwc.ini   the gaming TTY
+#   * ~/.config/retrobox/retrobox.ini.d/50-labwc.ini   the gaming TTY, and
+#     [core] system_settings: retrobox-system-settings, which sets the time
+#     zone and keyboard from EmulationStation in console mode
 #
 # The keyboard is always the system's (/etc/default/keyboard on Debian,
 # localectl elsewhere), read every time the session starts. After changing
@@ -67,6 +70,7 @@ readonly TTY_DROPIN="${RETROBOX_CONFIG_DIR}/retrobox.ini.d/50-labwc.ini"
 readonly MANIFEST="${DATA_DIR}/.install-manifest"
 readonly BIN_DIR="${HOME}/.local/bin"
 readonly SESSION_LINK="${BIN_DIR}/retrobox-labwc-session"
+readonly SETTINGS_LINK="${BIN_DIR}/retrobox-system-settings"
 readonly POLKIT_DIR="${RETROBOX_POLKIT_DIR:-/etc/polkit-1/rules.d}"
 readonly SYSTEMD_DIR="${RETROBOX_SYSTEMD_DIR:-/etc/systemd/system}"
 readonly OS_RELEASE="${RETROBOX_OS_RELEASE:-/etc/os-release}"
@@ -378,8 +382,9 @@ polkit_rule_path() {
 polkit_rule_content() {
   cat <<RULE
 // Written ${GENERATED_MARK}: ${USER_NAME} may power off and reboot from any
-// session (EmulationStation sends systemctl poweroff and reboot) and start,
-// stop and restart ${UNIT_NAME} (ssh included).
+// session (EmulationStation sends systemctl poweroff and reboot), start,
+// stop and restart ${UNIT_NAME} (ssh included), and set the system's time
+// zone and keyboard layout (retrobox-system-settings, from EmulationStation).
 polkit.addRule(function(action, subject) {
   if (subject.user != "${USER_NAME}") {
     return polkit.Result.NOT_HANDLED;
@@ -390,6 +395,10 @@ polkit.addRule(function(action, subject) {
   }
   if (action.id == "org.freedesktop.systemd1.manage-units" &&
       action.lookup("unit") == "${UNIT_NAME}") {
+    return polkit.Result.YES;
+  }
+  if (action.id == "org.freedesktop.timedate1.set-timezone" ||
+      action.id == "org.freedesktop.locale1.set-keyboard") {
     return polkit.Result.YES;
   }
   return polkit.Result.NOT_HANDLED;
@@ -514,7 +523,8 @@ write_on_quit() {
 write_tty_setting() {
   info "Gaming TTY: ${TTY} (${TTY_DROPIN})"
   mkdir -p -- "$(dirname -- "${TTY_DROPIN}")"
-  printf '# Written %s.\n[advanced]\nlabwc_tty = %s\n' "${GENERATED_MARK}" "${TTY}" >"${TTY_DROPIN}"
+  printf '# Written %s.\n[advanced]\nlabwc_tty = %s\n\n[core]\n# console mode: EmulationStation sets the time zone and keyboard with it\nsystem_settings = %s\n' \
+    "${GENERATED_MARK}" "${TTY}" "${DATA_DIR}/bin/retrobox-system-settings" >"${TTY_DROPIN}"
 }
 
 # Deletes our block from a profile (if it is there). Written back with cat so
@@ -607,6 +617,7 @@ do_install() {
 
   mkdir -p -- "${BIN_DIR}"
   ln -sfn -- "${DATA_DIR}/bin/retrobox-labwc-session" "${SESSION_LINK}"
+  ln -sfn -- "${DATA_DIR}/bin/retrobox-system-settings" "${SETTINGS_LINK}"
   [[ ":${PATH}:" == *":${BIN_DIR}:"* ]] || warn "${BIN_DIR} is not in your PATH (retrobox-labwc-session is linked there)."
 
   merge_notes
@@ -671,6 +682,9 @@ do_uninstall() {
     rm -f -- "${TTY_DROPIN}"
     rmdir --ignore-fail-on-non-empty -- "$(dirname -- "${TTY_DROPIN}")" 2>/dev/null || true
     found=1
+  fi
+  if [[ -L "${SETTINGS_LINK}" && "$(readlink -- "${SETTINGS_LINK}")" == "${DATA_DIR}/"* ]]; then
+    rm -f -- "${SETTINGS_LINK}"
   fi
   if [[ -L "${SESSION_LINK}" && "$(readlink -- "${SESSION_LINK}")" == "${DATA_DIR}/"* ]]; then
     rm -f -- "${SESSION_LINK}"

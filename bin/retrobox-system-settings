@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# retrobox-system-settings: the machine's time zone and keyboard layout, for
+# EmulationStation's system settings in Retrobox's console mode.
+#
+#   retrobox-system-settings timezone get | set ZONE
+#   retrobox-system-settings keyboard get | list-layouts | list-variants LAYOUT | set LAYOUT [VARIANT]
+#
+# This is the program retrobox-core's README asks for ("Console mode and the
+# system's settings"): install.sh points [core] system_settings at it, and
+# EmulationStation runs it in place of batocera-timezone and batocera-keyboard.
+#
+# They are the system's own settings, set with systemd (timedatectl,
+# localectl): they end up where the distribution keeps them (/etc/localtime;
+# /etc/default/keyboard on Debian, which also sets the text console) and are
+# read back from there. No password is asked: install.sh's polkit rule lets the
+# session's user do these two things. A new time zone applies at once; a new
+# keyboard layout when the session starts again (it reads the system's
+# keyboard then).
+#
+# get prints the value (keyboard: "<layout> <variant>", "none" for no
+# variant); the lists print "<code> <description>" lines (XKB's, from
+# /usr/share/X11/xkb/rules/evdev.lst); a failure exits with 1 and its last line
+# is "Error: <why>", which EmulationStation shows.
+set -euo pipefail
+
+ZONEINFO="${RETROBOX_ZONEINFO:-/usr/share/zoneinfo}"
+XKB_RULES="${RETROBOX_XKB_RULES:-/usr/share/X11/xkb/rules/evdev.lst}"
+KEYBOARD_FILE="${RETROBOX_KEYBOARD_FILE:-/etc/default/keyboard}"
+LOCALTIME="${RETROBOX_LOCALTIME:-/etc/localtime}"
+
+fail() {
+  echo "Error: $*"
+  exit 1
+}
+
+usage() {
+  sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Runs a systemd tool that changes a setting; its error, when it fails, says why.
+change() {
+  local what="$1" out
+  shift
+  have "$1" || fail "cannot change ${what}: $1 is not installed (it needs systemd)"
+  if ! out="$("$@" 2>&1)"; then
+    out="$(printf '%s\n' "${out}" | sed '/^$/d' | tail -n 1)"
+    case "${out,,}" in
+    *authoriz* | *authentication*) out+=" (is the polkit rule of install.sh in place?)" ;;
+    *) ;;
+    esac
+    fail "cannot change ${what}: ${out:-$1 failed}"
+  fi
+}
+
+## Time zone ------------------------------------------------------------------
+
+timezone_get() {
+  local zone="" target
+  have timedatectl && zone="$(timedatectl show --property=Timezone --value 2>/dev/null || true)"
+  if [[ -z "${zone}" ]] && target="$(readlink -- "${LOCALTIME}" 2>/dev/null)"; then
+    [[ "${target}" == */zoneinfo/* ]] && zone="${target##*/zoneinfo/}"
+  fi
+  printf '%s\n' "${zone}"
+}
+
+timezone_set() {
+  local zone="$1"
+  [[ "${zone}" =~ ^[A-Za-z][A-Za-z0-9_+-]*(/[A-Za-z0-9_+-]+)*$ && -f "${ZONEINFO}/${zone}" ]] \
+    || fail "unknown time zone '${zone}'"
+  change "the time zone" timedatectl --no-ask-password set-timezone "${zone}"
+}
+
+## Keyboard -------------------------------------------------------------------
+
+# "<code> <description>" lines of one "! <section>" of XKB's list
+xkb_section() {
+  [[ -r "${XKB_RULES}" ]] || fail "no keyboard layouts on this system (${XKB_RULES})"
+  awk -v want="$1" '
+    /^!/ { inside = ($2 == want); next }
+    inside && NF { code = $1; sub(/^[ \t]*[^ \t]+[ \t]+/, ""); print code " " $0 }
+  ' "${XKB_RULES}"
+}
+
+keyboard_layouts() {
+  xkb_section layout | sort -f -k2
+}
+
+keyboard_variants() {
+  local layout="$1"
+  xkb_section variant | awk -v prefix="${layout}:" '
+    { code = $1; rest = $0; sub(/^[^ ]+ /, "", rest)
+      if (index(rest, prefix) == 1) { sub(/^[^:]+:[ \t]*/, "", rest); print code " " rest } }'
+}
+
+# /etc/default/keyboard's value of one XKB* key (Debian's keyboard-configuration)
+keyboard_file_value() {
+  [[ -r "${KEYBOARD_FILE}" ]] || return 0
+  sed -n "s/^[[:space:]]*$1=[\"']\{0,1\}\([^\"'#]*\)[\"']\{0,1\}.*/\1/p" "${KEYBOARD_FILE}" | tail -n 1
+}
+
+# localectl's value of one "X11 <field>" line
+localectl_value() {
+  have localectl || return 0
+  localectl status 2>/dev/null | sed -n "s/^[[:space:]]*X11 $1:[[:space:]]*//p" | sed 's/^n\/a$//' | head -n 1
+}
+
+# layout, variant, model and options of the system's keyboard, one per line
+keyboard_current() {
+  local layout
+  layout="$(keyboard_file_value XKBLAYOUT)"
+  if [[ -n "${layout}" ]]; then
+    printf '%s\n%s\n%s\n%s\n' "${layout}" "$(keyboard_file_value XKBVARIANT)" \
+      "$(keyboard_file_value XKBMODEL)" "$(keyboard_file_value XKBOPTIONS)"
+  else
+    printf '%s\n%s\n%s\n%s\n' "$(localectl_value Layout)" "$(localectl_value Variant)" \
+      "$(localectl_value Model)" "$(localectl_value Options)"
+  fi
+}
+
+keyboard_get() {
+  local current
+  mapfile -t current < <(keyboard_current)
+  printf '%s %s\n' "${current[0]:-us}" "${current[1]:-none}"
+}
+
+# Whether a code is one of the "<code> <description>" lines given (whole list
+# read first: grep -q stopping early would break the pipe under pipefail).
+listed() {
+  local code="$1" list="$2"
+  [[ "${code}" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || return 1
+  printf '%s\n' "${list}" | awk -v code="${code}" '$1 == code { found = 1 } END { exit !found }'
+}
+
+keyboard_set() {
+  local layout="$1" variant="${2:-}" current
+  [[ "${variant}" == none ]] && variant=""
+  if ! listed "${layout}" "$(keyboard_layouts)"; then
+    fail "unknown keyboard layout '${layout}'"
+  fi
+  if [[ -n "${variant}" ]] && ! listed "${variant}" "$(keyboard_variants "${layout}")"; then
+    fail "the keyboard layout '${layout}' has no variant '${variant}'"
+  fi
+  mapfile -t current < <(keyboard_current)
+  # the model and options the system had stay
+  change "the keyboard layout" localectl --no-ask-password set-x11-keymap \
+    "${layout}" "${current[2]:-}" "${variant}" "${current[3]:-}"
+}
+
+## Command line ---------------------------------------------------------------
+
+case "${1:-} ${2:-}" in
+"timezone get") timezone_get ;;
+"timezone set") [[ $# -eq 3 ]] || usage 2; timezone_set "$3" ;;
+"keyboard get") keyboard_get ;;
+"keyboard list-layouts") keyboard_layouts ;;
+"keyboard list-variants") [[ $# -eq 3 ]] || usage 2; keyboard_variants "$3" ;;
+"keyboard set") [[ $# -eq 3 || $# -eq 4 ]] || usage 2; keyboard_set "$3" "${4:-}" ;;
+"-h "* | "--help "*) usage 0 ;;
+*) usage 2 >&2 ;;
+esac

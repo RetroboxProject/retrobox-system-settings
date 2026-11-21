@@ -19,7 +19,20 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
-          shellcheck -x -S style install.sh bin/* libexec/* tests/*.sh
+          shellcheck -x -S style install.sh bin/* libexec/* tests/*.sh packaging/*.sh
 
       - name: Smoke test
         run: tests/smoke-test.sh
+
+      - name: Build the .deb
+        run: |
+          git fetch --tags --quiet || true
+          packaging/build-deb.sh "" dist
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --contents dist/*.deb
+
+      - name: Upload the .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrobox-system-settings-deb
+          path: dist/*.deb

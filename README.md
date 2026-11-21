@@ -1,6 +1,6 @@
-# retrobox-labwc
+# retrobox-system-settings
 
-The labwc gaming session of [Retrobox](https://github.com/RetroboxProject/retrobox-core), for **minimal systems** (Debian netinstall, Arch, ...): the machine boots on a TTY, where a systemd service starts [labwc](https://labwc.github.io) and Retrobox runs inside it. No desktop, no display manager, no autologin.
+What turns a machine into a [Retrobox](https://github.com/RetroboxProject/retrobox-core) console, with Retrobox as its only interface: for now, the labwc gaming session for **minimal systems** (Debian netinstall, Arch, ...), where the machine boots on a TTY, a systemd service starts [labwc](https://labwc.github.io) and Retrobox runs inside it (no desktop, no display manager, no autologin), and [the machine's settings](#system-settings-console-mode) that EmulationStation changes in console mode. It used to be *retrobox-labwc*, and the session still goes by that name (`retrobox-labwc.service`, `retrobox-labwc-session`, `~/.config/retrobox-labwc`).
 
 It is a single installer: it installs no packages, it checks what the system must already have and sets up the rest (your home, plus one service and one polkit rule through `sudo`).
 
@@ -36,8 +36,15 @@ plus `retrobox-core`, systemd and PAM (`libpam-systemd` on Debian). For any TTY 
 ## Install
 
 ```bash
-git clone https://github.com/RetroboxProject/retrobox-labwc && cd retrobox-labwc
+git clone https://github.com/RetroboxProject/retrobox-system-settings && cd retrobox-system-settings
 ./install.sh --tty 1        # --check --tty 1 only checks; --force installs even if a check fails
+```
+
+Or, on Debian, with the package (CI builds it, `packaging/build-deb.sh` too), which pulls what the session needs through apt and puts this tree in `/usr/share/retrobox-system-settings`; then, as the user who plays:
+
+```bash
+sudo apt install ./retrobox-system-settings_*_all.deb
+retrobox-session-install --tty 1      # the same install.sh
 ```
 
 The installer needs root for two files only (it asks for your password through `sudo`; `--no-system` skips both): `/etc/systemd/system/retrobox-labwc.service`, enabled at boot, and the polkit rule below (`--no-polkit` skips just the rule). The service takes the gaming TTY over from its getty (`Conflicts=getty@ttyN`), logs your user in through PAM (a real logind session, which labwc needs), switches to that VT (`chvt N`) and runs the session from a login shell, so your `PATH` is the one of your profile. When it ends, however it ends, the getty comes back. `./install.sh --check` prints the unit it would write.
@@ -46,7 +53,7 @@ Everything lands in your home:
 
 - `~/.local/share/retrobox-labwc`: a copy of this tree (the checkout can go) and `retrobox-labwc-session` linked in `~/.local/bin`
 - `~/.config/retrobox-labwc`: labwc's config for the session (`labwc -C`); your `~/.config/labwc` is never touched
-- `~/.config/retrobox/retrobox.ini.d/50-labwc.ini`: `[advanced] labwc_tty`
+- `~/.config/retrobox/retrobox.ini.d/50-labwc.ini`: `[advanced] labwc_tty`, and `[core] system_settings` (see [System settings](#system-settings-console-mode))
 
 **The TTY is fixed once installed.** To change it: `~/.local/share/retrobox-labwc/install.sh --uninstall`, then install again. Running the installer again with the same TTY just updates.
 
@@ -61,6 +68,17 @@ sudo dpkg-reconfigure keyboard-configuration
 ```
 
 then press **Win+Shift+R** (or `systemctl restart retrobox-labwc`).
+
+## System settings (console mode)
+
+In Retrobox's console mode (`[core] console_mode = true`), EmulationStation is the machine's only screen, so its *System settings* offer the machine's **time zone** and **keyboard layout and variant**, as batocera's do. Retrobox doesn't set those itself: it runs `bin/retrobox-system-settings`, which `install.sh` links in `~/.local/bin` and points `[core] system_settings` at (the package also puts it in `/usr/bin`, where Retrobox finds it too):
+
+```
+retrobox-system-settings timezone get | set ZONE
+retrobox-system-settings keyboard get | list-layouts | list-variants LAYOUT | set LAYOUT [VARIANT]
+```
+
+They are the system's own settings, set with systemd's `timedatectl` and `localectl`, so they end up where the distribution keeps them (`/etc/localtime`; `/etc/default/keyboard` on Debian, which the session reads, and which also sets the text console) and are read back from there. The layouts and variants are XKB's (`/usr/share/X11/xkb/rules/evdev.lst`); a new layout keeps the model and options the system had. A new time zone applies at once; a new keyboard layout when the session starts again, which EmulationStation offers. No password is asked: the polkit rule below lets your user do these two things. When it can't (no systemd, no rule), EmulationStation shows why.
 
 ## Mouse pointer
 
@@ -96,7 +114,7 @@ external_output = HDMI-A-1      ; default: the first other output
 
 When Retrobox quits normally (exit status 0) the machine powers off; a crash, Win+Shift+E or a restart never do. That is the default of `./install.sh`; `--on-quit shell` just ends the service instead, so the TTY shows its login prompt (the choice lives in `~/.config/retrobox-labwc/on_quit`, and a re-run keeps it unless you give the option again).
 
-`systemctl poweroff` and `reboot` (also the ones EmulationStation sends) need polkit to allow them. The installer writes `/etc/polkit-1/rules.d/50-retrobox-labwc.rules`, which lets your user power off and reboot from any session and start, stop and restart `retrobox-labwc.service` without a password (`--no-polkit` skips it, and then those need `sudo`; `--uninstall` removes it; it needs `polkitd` installed). If a reboot is already in progress when Retrobox exits, the power off does not replace it.
+`systemctl poweroff` and `reboot` (also the ones EmulationStation sends) need polkit to allow them. The installer writes `/etc/polkit-1/rules.d/50-retrobox-labwc.rules`, which lets your user power off and reboot from any session, start, stop and restart `retrobox-labwc.service`, and set the system's time zone and keyboard layout ([System settings](#system-settings-console-mode)) without a password (`--no-polkit` skips it, and then those need `sudo`; `--uninstall` removes it; it needs `polkitd` installed). If a reboot is already in progress when Retrobox exits, the power off does not replace it.
 
 **D-Bus.** The session uses your user bus (`$XDG_RUNTIME_DIR/bus`, run by systemd's user manager), so portals, pipewire and wireplumber are one set shared with everything else you run, and the compositor's environment (`WAYLAND_DISPLAY`, ...) is handed to that bus while the session lasts. Without a user bus (no `dbus-user-session` on Debian) it falls back to a private one with `dbus-run-session`; `RETROBOX_LABWC_PRIVATE_BUS=1` forces that fallback.
 
@@ -106,10 +124,11 @@ The session log is `~/.local/state/retrobox/logs/labwc-session.log`; the service
 
 ```
 install.sh    the installer: --check, install, --uninstall
-bin/          retrobox-labwc-session
+bin/          retrobox-labwc-session, retrobox-system-settings
 libexec/      display switcher, mouse-hide, mouse-show, retrobox-labwc-common.sh (settings, keyboard)
 share/        labwc config templates
 tests/        smoke-test.sh (stand-in commands, throwaway HOME)
+packaging/    build-deb.sh
 ```
 
 ## License
