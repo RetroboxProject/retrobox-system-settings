@@ -420,4 +420,49 @@ out="$(DENY=1 settings keyboard set us)" && fail "a refusal must fail"
 [[ "${out}" == "Error: cannot change the keyboard layout: Access denied: Interactive authentication required. (is the polkit rule of install.sh in place?)" ]] || fail "refusal not explained: ${out}"
 pass "retrobox-system-settings reads and sets the system's time zone and keyboard, and says why it can't"
 
+# --- 13. the Openbox session: session.d hooks, the rc.xml, picom and Retrobox -----------------
+OB="${WORK}/openbox"
+mkdir -p "${OB}/bin" "${OB}/etc/session.d" "${OB}/etc/openbox" "${OB}/run"
+cat >"${OB}/bin/openbox" <<'SH'
+#!/bin/sh
+echo "openbox $*" >>"${OB_LOG}"
+# Openbox runs its --startup command
+while [ $# -gt 0 ]; do [ "$1" = --startup ] && exec "$2"; shift; done
+SH
+printf '#!/bin/sh\necho "picom $*" >>"${OB_LOG}"\n' >"${OB}/bin/picom"
+printf '#!/bin/sh\necho "retrobox $*" >>"${OB_LOG}"\n' >"${OB}/bin/retrobox"
+printf '#!/bin/sh\necho "hook 10" >>"${OB_LOG}"\n' >"${OB}/etc/session.d/10-first"
+printf '#!/bin/sh\necho "hook 20" >>"${OB_LOG}"; exit 3\n' >"${OB}/etc/session.d/20-fails"
+printf 'not run: not executable\n' >"${OB}/etc/session.d/30-text"
+chmod +x "${OB}/bin/"* "${OB}/etc/session.d/10-first" "${OB}/etc/session.d/20-fails"
+export OB_LOG="${OB}/log"
+openbox_session() {
+  : >"${OB_LOG}"
+  PATH="${OB}/bin:${PATH}" RETROBOX_SYSTEM_SETTINGS_SYSCONFDIR="${OB}/etc" XDG_RUNTIME_DIR="${OB}/run" \
+    "${ROOT}/bin/retrobox-openbox-session"
+  wait 2>/dev/null || true
+  sleep 0.2 # Retrobox runs in the background
+}
+openbox_session || fail "the Openbox session failed: $(cat "${HOME}/.local/state/retrobox/logs/openbox-session.log")"
+[[ "$(head -n 2 "${OB_LOG}")" == $'hook 10\nhook 20' ]] || fail "session.d hooks: $(cat "${OB_LOG}")"
+grep -q "^openbox --config-file ${OB}/run/retrobox-openbox-rc.xml --startup ${ROOT}/libexec/retrobox-openbox-autostart\$" "${OB_LOG}" || fail "openbox not started right: $(cat "${OB_LOG}")"
+grep -q "${ROOT}/libexec/retrobox-volume up" "${OB}/run/retrobox-openbox-rc.xml" || fail "@LIBEXEC@ not filled in"
+grep -qx 'picom -b --config /dev/null --backend glx --vsync' "${OB_LOG}" && grep -qx 'retrobox ' "${OB_LOG}" || fail "autostart: $(cat "${OB_LOG}")"
+grep -q '20-fails failed (status 3), going on' "${HOME}/.local/state/retrobox/logs/openbox-session.log" || fail "a failing hook is not reported"
+printf '<openbox_config/>\n' >"${OB}/etc/openbox/rc.xml"
+mkdir -p "${RETROBOX_SYSCONFDIR}"
+printf '[openbox]\ncompositor = none\n' >"${RETROBOX_SYSCONFDIR}/retrobox.ini"
+openbox_session || fail "the Openbox session failed with the machine's rc.xml"
+grep -q "^openbox --config-file ${OB}/etc/openbox/rc.xml " "${OB_LOG}" || fail "the machine's rc.xml not used"
+! grep -q '^picom' "${OB_LOG}" || fail "[openbox] compositor = none still runs picom"
+rm -f "${RETROBOX_SYSCONFDIR}/retrobox.ini"
+pass "the Openbox session runs session.d, picks its rc.xml, then picom and Retrobox"
+
+# --- 14. retrobox-polkit-rule: the same rule for any session ---------------------------------------
+"${ROOT}/libexec/retrobox-polkit-rule" retrobox >"${WORK}/rule" || fail "retrobox-polkit-rule failed"
+grep -q 'subject.user != "retrobox"' "${WORK}/rule" && grep -q 'timedate1.set-timezone' "${WORK}/rule" && grep -q 'login1.power-off' "${WORK}/rule" || fail "rule wrong: $(cat "${WORK}/rule")"
+! grep -q 'manage-units' "${WORK}/rule" || fail "a unit in a rule without --unit"
+expect_fail "${ROOT}/libexec/retrobox-polkit-rule" 'bad"user'
+pass "retrobox-polkit-rule prints the console's rule, with the unit only when given"
+
 echo "All smoke tests passed."

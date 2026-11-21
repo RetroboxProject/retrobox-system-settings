@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Prints the polkit rule that lets the console's user, with no password:
+#   * power off and reboot from any session (EmulationStation sends
+#     systemctl poweroff and reboot; ssh too),
+#   * set the system's time zone and keyboard layout (retrobox-system-settings,
+#     from EmulationStation's system settings in console mode),
+#   * with --unit, start, stop and restart that systemd unit (the labwc
+#     session's service).
+# install.sh writes it for the labwc session; a system set up otherwise (a
+# display manager starting the Openbox session, like nx-debian's image) writes
+# it with this, e.g.:
+#   retrobox-polkit-rule retrobox > /etc/polkit-1/rules.d/50-retrobox-console.rules
+#
+# Usage: retrobox-polkit-rule [--unit UNIT] [--mark TEXT] USER
+set -euo pipefail
+
+unit="" mark="by retrobox-polkit-rule"
+while (($# > 1)); do
+  case "$1" in
+  --unit) unit="$2"; shift 2 ;;
+  --mark) mark="$2"; shift 2 ;;
+  *) break ;;
+  esac
+done
+if (($# != 1)) || [[ ! "$1" =~ ^[a-z_][a-z0-9_.-]*$ ]] || [[ -n "${unit}" && ! "${unit}" =~ ^[A-Za-z0-9@_.:-]+$ ]]; then
+  echo "usage: $(basename "$0") [--unit UNIT] [--mark TEXT] USER" >&2
+  exit 2
+fi
+user="$1"
+
+if [[ -n "${unit}" ]]; then
+  cat <<RULE
+// Written ${mark}: ${user} may power off and reboot from any
+// session (EmulationStation sends systemctl poweroff and reboot), start,
+// stop and restart ${unit} (ssh included), and set the system's time
+// zone and keyboard layout (retrobox-system-settings, from EmulationStation).
+RULE
+else
+  cat <<RULE
+// Written ${mark}: ${user} may power off and reboot from any
+// session (EmulationStation sends systemctl poweroff and reboot), and set
+// the system's time zone and keyboard layout (retrobox-system-settings,
+// from EmulationStation).
+RULE
+fi
+cat <<RULE
+polkit.addRule(function(action, subject) {
+  if (subject.user != "${user}") {
+    return polkit.Result.NOT_HANDLED;
+  }
+  if (action.id.indexOf("org.freedesktop.login1.power-off") == 0 ||
+      action.id.indexOf("org.freedesktop.login1.reboot") == 0) {
+    return polkit.Result.YES;
+  }
+RULE
+if [[ -n "${unit}" ]]; then
+  cat <<RULE
+  if (action.id == "org.freedesktop.systemd1.manage-units" &&
+      action.lookup("unit") == "${unit}") {
+    return polkit.Result.YES;
+  }
+RULE
+fi
+cat <<'RULE'
+  if (action.id == "org.freedesktop.timedate1.set-timezone" ||
+      action.id == "org.freedesktop.locale1.set-keyboard") {
+    return polkit.Result.YES;
+  }
+  return polkit.Result.NOT_HANDLED;
+});
+RULE

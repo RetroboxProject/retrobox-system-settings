@@ -28,11 +28,10 @@ jobs:
         run: |
           git fetch --tags --quiet || true
           packaging/build-deb.sh "" dist
-          dpkg-deb --info dist/*.deb
-          dpkg-deb --contents dist/*.deb
+          for deb in dist/*.deb; do dpkg-deb --info "${deb}"; dpkg-deb --contents "${deb}"; done
 
       - name: Upload the .deb
         uses: actions/upload-artifact@v4
         with:
-          name: retrobox-system-settings-deb
+          name: retrobox-system-settings-debs
           path: dist/*.deb

@@ -1,6 +1,9 @@
 # retrobox-system-settings
 
-What turns a machine into a [Retrobox](https://github.com/RetroboxProject/retrobox-core) console, with Retrobox as its only interface: for now, the labwc gaming session for **minimal systems** (Debian netinstall, Arch, ...), where the machine boots on a TTY, a systemd service starts [labwc](https://labwc.github.io) and Retrobox runs inside it (no desktop, no display manager, no autologin), and [the machine's settings](#system-settings-console-mode) that EmulationStation changes in console mode. It used to be *retrobox-labwc*, and the session still goes by that name (`retrobox-labwc.service`, `retrobox-labwc-session`, `~/.config/retrobox-labwc`).
+What turns a machine into a [Retrobox](https://github.com/RetroboxProject/retrobox-core) console, with Retrobox as its only interface, in one of two sessions, plus [the machine's settings](#system-settings-console-mode) that EmulationStation changes in console mode:
+
+- the **labwc** session (Wayland), for **minimal systems** (Debian netinstall, Arch, ...): the machine boots on a TTY, where a systemd service starts [labwc](https://labwc.github.io) and Retrobox runs inside it. No desktop, no display manager, no autologin. Most of this README is about it.
+- the **Openbox** session (X11), for a **display manager** that logs the console's user into it, as nx-debian's image does with lightdm: see [Openbox session](#openbox-session). It used to be *retrobox-labwc*, and the session still goes by that name (`retrobox-labwc.service`, `retrobox-labwc-session`, `~/.config/retrobox-labwc`).
 
 It is a single installer: it installs no packages, it checks what the system must already have and sets up the rest (your home, plus one service and one polkit rule through `sudo`).
 
@@ -40,12 +43,18 @@ git clone https://github.com/RetroboxProject/retrobox-system-settings && cd retr
 ./install.sh --tty 1        # --check --tty 1 only checks; --force installs even if a check fails
 ```
 
-Or, on Debian, with the package (CI builds it, `packaging/build-deb.sh` too), which pulls what the session needs through apt and puts this tree in `/usr/share/retrobox-system-settings`; then, as the user who plays:
+Or, on Debian, with the packages of a [release](../../releases) (or `packaging/build-deb.sh`), which pull what the session needs through apt and put this tree in `/usr/share/retrobox-system-settings`; then, as the user who plays:
 
 ```bash
-sudo apt install ./retrobox-system-settings_*_all.deb
+sudo apt install ./retrobox-system-settings_*_all.deb ./retrobox-session-labwc_*_all.deb
 retrobox-session-install --tty 1      # the same install.sh
 ```
+
+| Package | What it has |
+|---|---|
+| `retrobox-system-settings` | what every console needs: `retrobox-system-settings`, `retrobox-polkit-rule`, the volume keys' `retrobox-volume` |
+| `retrobox-session-labwc` | the labwc session and its installer (`retrobox-session-install`) |
+| `retrobox-session-openbox` | the Openbox session and its `/usr/share/xsessions/retrobox-openbox.desktop` |
 
 The installer needs root for two files only (it asks for your password through `sudo`; `--no-system` skips both): `/etc/systemd/system/retrobox-labwc.service`, enabled at boot, and the polkit rule below (`--no-polkit` skips just the rule). The service takes the gaming TTY over from its getty (`Conflicts=getty@ttyN`), logs your user in through PAM (a real logind session, which labwc needs), switches to that VT (`chvt N`) and runs the session from a login shell, so your `PATH` is the one of your profile. When it ends, however it ends, the getty comes back. `./install.sh --check` prints the unit it would write.
 
@@ -79,6 +88,16 @@ retrobox-system-settings keyboard get | list-layouts | list-variants LAYOUT | se
 ```
 
 They are the system's own settings, set with systemd's `timedatectl` and `localectl`, so they end up where the distribution keeps them (`/etc/localtime`; `/etc/default/keyboard` on Debian, which the session reads, and which also sets the text console) and are read back from there. The layouts and variants are XKB's (`/usr/share/X11/xkb/rules/evdev.lst`); a new layout keeps the model and options the system had. A new time zone applies at once; a new keyboard layout when the session starts again, which EmulationStation offers. No password is asked: the polkit rule below lets your user do these two things. When it can't (no systemd, no rule), EmulationStation shows why.
+
+## Openbox session
+
+For a machine whose display manager logs the console's user in (no TTY service, no `install.sh`): install `retrobox-session-openbox` and choose its session, `retrobox-openbox` (lightdm: `autologin-session=retrobox-openbox`). `retrobox-openbox-session` then:
+
+1. runs the executables of `/etc/retrobox-system-settings/session.d/`, then `~/.config/retrobox-openbox/session.d/`, in name order: what the machine's own packages want done at every start (nx-debian puts EmulationStation's defaults for the Switch there). A failing one is logged and skipped.
+2. starts Openbox with the first of `~/.config/retrobox-openbox/rc.xml`, `/etc/retrobox-system-settings/openbox/rc.xml` and this tree's `share/openbox/rc.xml`, which only takes the volume keys (`retrobox-volume`) and the power key (left to logind) so that EmulationStation never sees them.
+3. once Openbox is up, starts the picom compositor (vsync, the overlay's translucency; no config file, so no shadows nor fades) and Retrobox. picom's backend is `[openbox] compositor` in `retrobox.ini`: `glx` (the default), `xrender`, `egl`, or `none` for no compositor. If Retrobox ends, Openbox stays up.
+
+Its log is `~/.local/state/retrobox/logs/openbox-session.log`. With no `install.sh`, nothing writes the polkit rule: the machine writes it, with `retrobox-polkit-rule USER > /etc/polkit-1/rules.d/50-retrobox-console.rules` (power off, reboot, time zone and keyboard for that user). Retrobox finds `retrobox-system-settings` in `/usr/bin`.
 
 ## Mouse pointer
 
@@ -124,11 +143,12 @@ The session log is `~/.local/state/retrobox/logs/labwc-session.log`; the service
 
 ```
 install.sh    the installer: --check, install, --uninstall
-bin/          retrobox-labwc-session, retrobox-system-settings
-libexec/      display switcher, mouse-hide, mouse-show, retrobox-labwc-common.sh (settings, keyboard)
-share/        labwc config templates
+bin/          retrobox-labwc-session, retrobox-openbox-session, retrobox-system-settings
+libexec/      display switcher, mouse-hide, mouse-show, retrobox-labwc-common.sh (settings, keyboard),
+              retrobox-openbox-autostart, retrobox-polkit-rule, retrobox-volume
+share/        labwc config templates, Openbox's rc.xml, the xsession entry
 tests/        smoke-test.sh (stand-in commands, throwaway HOME)
-packaging/    build-deb.sh
+packaging/    build-deb.sh (the three packages; .github/workflows/build.yml publishes them)
 ```
 
 ## License

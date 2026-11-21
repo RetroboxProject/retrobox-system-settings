@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Started by Openbox in the Retrobox session (retrobox-openbox-session), once
+# the window manager is up: the compositor, then Retrobox.
+#
+# The compositor is picom, for vsync (no tearing) and the overlay's
+# translucency over a game, with no config file (a distribution's
+# /etc/xdg/picom.conf turns on shadows and fades, which a console does not
+# want). Its backend is [openbox] compositor in retrobox.ini: glx (the
+# default), xrender, egl, or none for no compositor.
+#
+# Retrobox runs in the background: if it ends, Openbox stays up.
+set -euo pipefail
+
+# shellcheck source=libexec/retrobox-labwc-common.sh
+source "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/retrobox-labwc-common.sh"
+
+backend="$(get_retrobox_setting openbox compositor || true)"
+backend="${backend:-glx}"
+case "${backend}" in
+none) echo "compositor: none" ;;
+glx | xrender | egl)
+  if command -v picom >/dev/null 2>&1; then
+    picom -b --config /dev/null --backend "${backend}" --vsync || echo "picom failed (backend ${backend})"
+  else
+    echo "compositor: picom is not installed"
+  fi
+  ;;
+*) echo "[openbox] compositor: unknown '${backend}' (glx, xrender, egl or none): no compositor" ;;
+esac
+
+retrobox &

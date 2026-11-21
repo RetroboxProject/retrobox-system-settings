@@ -380,30 +380,7 @@ polkit_rule_path() {
 }
 
 polkit_rule_content() {
-  cat <<RULE
-// Written ${GENERATED_MARK}: ${USER_NAME} may power off and reboot from any
-// session (EmulationStation sends systemctl poweroff and reboot), start,
-// stop and restart ${UNIT_NAME} (ssh included), and set the system's time
-// zone and keyboard layout (retrobox-system-settings, from EmulationStation).
-polkit.addRule(function(action, subject) {
-  if (subject.user != "${USER_NAME}") {
-    return polkit.Result.NOT_HANDLED;
-  }
-  if (action.id.indexOf("org.freedesktop.login1.power-off") == 0 ||
-      action.id.indexOf("org.freedesktop.login1.reboot") == 0) {
-    return polkit.Result.YES;
-  }
-  if (action.id == "org.freedesktop.systemd1.manage-units" &&
-      action.lookup("unit") == "${UNIT_NAME}") {
-    return polkit.Result.YES;
-  }
-  if (action.id == "org.freedesktop.timedate1.set-timezone" ||
-      action.id == "org.freedesktop.locale1.set-keyboard") {
-    return polkit.Result.YES;
-  }
-  return polkit.Result.NOT_HANDLED;
-});
-RULE
+  "${SELF_DIR}/libexec/retrobox-polkit-rule" --mark "${GENERATED_MARK}" --unit "${UNIT_NAME}" "${USER_NAME}"
 }
 
 # Lets the user power off, reboot and manage the service without a password.

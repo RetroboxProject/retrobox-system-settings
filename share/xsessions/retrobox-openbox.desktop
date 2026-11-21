@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Retrobox
+Comment=The Retrobox console: Openbox, picom and Retrobox
+Exec=/usr/bin/retrobox-openbox-session
+TryExec=/usr/bin/retrobox-openbox-session
+Type=Application
+DesktopNames=Retrobox

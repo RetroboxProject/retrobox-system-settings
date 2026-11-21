@@ -1,0 +1,65 @@
+name: build
+
+# Releases, by hand only (github-release-dispatch triggers it): checks, then
+# builds the Debian packages with the version given (v0.3 -> 0.3) and
+# publishes them as a GitHub Release of that tag. Without a version it only
+# builds them (an artifact), to try the packages of a commit.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (vX.Y or vX.Y.Z); empty: build only"
+        required: false
+        type: string
+      prerelease:
+        description: "Publish it as a pre-release"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck -x -S style install.sh bin/* libexec/* tests/*.sh packaging/*.sh
+
+      - name: Smoke test
+        run: tests/smoke-test.sh
+
+      - name: Build the packages
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ -n "${VERSION}" && ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "version must be vX.Y or vX.Y.Z, not ${VERSION}" >&2
+            exit 1
+          fi
+          packaging/build-deb.sh "${VERSION:-0.0.0~${GITHUB_SHA::7}}" dist
+          for deb in dist/*.deb; do dpkg-deb --info "${deb}"; done
+          (cd dist && sha256sum ./*.deb > SHA256SUMS)
+
+      - name: Upload the packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: retrobox-system-settings-debs
+          path: dist/*
+
+      - name: Publish the release
+        if: inputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          flags=(--target "${GITHUB_SHA}" --title "${VERSION}" --generate-notes)
+          [[ "${PRERELEASE}" == "true" ]] && flags+=(--prerelease)
+          gh release create "${VERSION}" "${flags[@]}" dist/*.deb dist/SHA256SUMS
