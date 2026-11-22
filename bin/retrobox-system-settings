@@ -15,9 +15,10 @@
 # /etc/default/keyboard on Debian, which also sets the text console;
 # /etc/default/locale or /etc/locale.conf) and are read back from there. No
 # password is asked: the polkit rule (retrobox-polkit-rule) lets the session's
-# user do these three things. Debian doesn't let localed set the keyboard: there
-# it is /etc/default/keyboard, which retrobox-set-keyboard writes, run as root
-# with pkexec (its own polkit action, in the same rule). A new time zone
+# user do these three things. Debian doesn't let localed set the keyboard nor
+# the language: there they are /etc/default/keyboard and /etc/default/locale,
+# which retrobox-settings-helper writes, run as root with pkexec (its own
+# polkit action, in the same rule). A new time zone
 # applies at once; a new keyboard layout or language when the session starts
 # again (it reads them then).
 #
@@ -35,8 +36,10 @@ set -euo pipefail
 ZONEINFO="${RETROBOX_ZONEINFO:-/usr/share/zoneinfo}"
 XKB_RULES="${RETROBOX_XKB_RULES:-/usr/share/X11/xkb/rules/evdev.lst}"
 KEYBOARD_FILE="${RETROBOX_KEYBOARD_FILE:-/etc/default/keyboard}"
-# where the package and install.sh put retrobox-set-keyboard (root's, for pkexec)
-KEYBOARD_HELPERS="${RETROBOX_KEYBOARD_HELPERS:-/usr/share/retrobox-system-settings/libexec/retrobox-set-keyboard /usr/local/libexec/retrobox-system-settings/retrobox-set-keyboard}"
+# Debian's language file: where there is one, the helper sets the language
+LOCALE_DEFAULT="${RETROBOX_LOCALE_DEFAULT:-/etc/default/locale}"
+# where the package and install.sh put retrobox-settings-helper (root's, for pkexec)
+SETTINGS_HELPERS="${RETROBOX_SETTINGS_HELPERS:-/usr/share/retrobox-system-settings/libexec/retrobox-settings-helper /usr/local/libexec/retrobox-system-settings/retrobox-settings-helper}"
 LOCALTIME="${RETROBOX_LOCALTIME:-/etc/localtime}"
 LOCALE_FILES="${RETROBOX_LOCALE_FILES:-/etc/default/locale /etc/locale.conf}"
 
@@ -65,6 +68,19 @@ change() {
     esac
     fail "cannot change ${what}: ${out:-$1 failed}"
   fi
+}
+
+# helper WHAT ARGS...: retrobox-settings-helper, as root (pkexec), for Debian's
+# keyboard and language, which localed may not set
+helper() {
+  local what="$1" path
+  shift
+  for path in ${SETTINGS_HELPERS}; do
+    [[ -x "${path}" ]] && break
+    path=""
+  done
+  [[ -n "${path}" ]] || fail "cannot change ${what}: retrobox-settings-helper is not installed (install.sh, or the retrobox-system-settings package)"
+  change "${what}" pkexec --disable-internal-agent "${path}" "$@"
 }
 
 ## Time zone ------------------------------------------------------------------
@@ -156,15 +172,9 @@ keyboard_set() {
     fail "the keyboard layout '${layout}' has no variant '${variant}'"
   fi
   # Debian: the keyboard is /etc/default/keyboard, which localed may not set
-  # (its D-Bus policy rejects SetX11Keyboard): retrobox-set-keyboard, as root
+  # (its D-Bus policy rejects SetX11Keyboard)
   if [[ -f "${KEYBOARD_FILE}" ]]; then
-    local helper
-    for helper in ${KEYBOARD_HELPERS}; do
-      [[ -x "${helper}" ]] && break
-      helper=""
-    done
-    [[ -n "${helper}" ]] || fail "cannot change the keyboard layout: retrobox-set-keyboard is not installed (install.sh, or the retrobox-system-settings package)"
-    change "the keyboard layout" pkexec --disable-internal-agent "${helper}" "${layout}" "${variant:-none}"
+    helper "the keyboard layout" keyboard "${layout}" "${variant:-none}"
     return 0
   fi
   mapfile -t current < <(keyboard_current)
@@ -212,6 +222,11 @@ locale_set() {
   [[ "${code}" =~ ^[a-z][a-z][a-z]?_[A-Z][A-Z]$ ]] || fail "unknown language '${code}'"
   name="$(locale_available | awk -v code="${code}" '$1 == code { print $2; exit }')"
   [[ -n "${name}" ]] || fail "the system has no locale for '${code}' (Debian: add ${code}.UTF-8 to /etc/locale.gen and run locale-gen)"
+  # Debian: /etc/default/locale, which localed may not set (SetLocale rejected)
+  if [[ -e "${LOCALE_DEFAULT}" ]]; then
+    helper "the language" locale "${code}"
+    return 0
+  fi
   change "the language" localectl --no-ask-password set-locale "LANG=${name}"
 }
 

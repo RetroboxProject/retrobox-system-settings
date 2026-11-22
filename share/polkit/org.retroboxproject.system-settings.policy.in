@@ -6,12 +6,13 @@
   <vendor>RetroboxProject</vendor>
   <vendor_url>https://github.com/RetroboxProject/retrobox-system-settings</vendor_url>
 
-  <!-- retrobox-set-keyboard, run with pkexec by retrobox-system-settings where
-       the keyboard is /etc/default/keyboard (Debian). An administrator's, by
-       default; the console's polkit rule gives it to the console's user. -->
-  <action id="org.retroboxproject.system-settings.set-keyboard">
-    <description>Set the system's keyboard layout</description>
-    <message>Authentication is required to set the system's keyboard layout.</message>
+  <!-- retrobox-settings-helper, run with pkexec by retrobox-system-settings
+       where localed may not set the keyboard and the language (Debian). An
+       administrator's, by default; the console's polkit rule gives it to the
+       console's user. -->
+  <action id="org.retroboxproject.system-settings.set">
+    <description>Set the system's keyboard layout and language</description>
+    <message>Authentication is required to set the system's keyboard layout and language.</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>

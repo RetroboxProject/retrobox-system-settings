@@ -75,10 +75,10 @@ build() {
 ## retrobox-system-settings
 stage="$(new_package retrobox-system-settings)"
 add "${stage}" bin/retrobox-system-settings libexec/retrobox-polkit-rule libexec/retrobox-volume \
-  libexec/retrobox-common.sh libexec/retrobox-set-keyboard
-# the polkit action of retrobox-set-keyboard (Debian's keyboard, with pkexec)
+  libexec/retrobox-common.sh libexec/retrobox-settings-helper
+# the polkit action of retrobox-settings-helper (Debian's keyboard and language, with pkexec)
 mkdir -p "${stage}/usr/share/polkit-1/actions"
-sed -e "s|@HELPER@|/${SHARE_PATH}/libexec/retrobox-set-keyboard|" \
+sed -e "s|@HELPER@|/${SHARE_PATH}/libexec/retrobox-settings-helper|" \
   -e "s|@MARK@|Installed by the retrobox-system-settings package|" \
   "${ROOT}/share/polkit/org.retroboxproject.system-settings.policy.in" \
   >"${stage}/usr/share/polkit-1/actions/org.retroboxproject.system-settings.policy"

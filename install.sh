@@ -78,12 +78,14 @@ readonly BIN_DIR="${HOME}/.local/bin"
 readonly SESSION_LINK="${BIN_DIR}/retrobox-session-labwc"
 readonly SETTINGS_LINK="${BIN_DIR}/retrobox-system-settings"
 readonly POLKIT_DIR="${RETROBOX_POLKIT_DIR:-/etc/polkit-1/rules.d}"
-# Debian's keyboard (/etc/default/keyboard) is set by retrobox-set-keyboard with
-# pkexec: a copy of it root's, and the polkit action that names that copy
+# Debian's keyboard and language (/etc/default/keyboard, /etc/default/locale)
+# are set by retrobox-settings-helper with pkexec: a copy of it root's, and the
+# polkit action that names that copy
 readonly POLKIT_ACTIONS_DIR="${RETROBOX_POLKIT_ACTIONS_DIR:-/usr/share/polkit-1/actions}"
 readonly POLICY_NAME="org.retroboxproject.system-settings.policy"
-readonly KEYBOARD_HELPER="${RETROBOX_KEYBOARD_HELPER:-/usr/local/libexec/retrobox-system-settings/retrobox-set-keyboard}"
+readonly SETTINGS_HELPER="${RETROBOX_SETTINGS_HELPER:-/usr/local/libexec/retrobox-system-settings/retrobox-settings-helper}"
 readonly KEYBOARD_FILE="${RETROBOX_KEYBOARD_FILE:-/etc/default/keyboard}"
+readonly LOCALE_DEFAULT="${RETROBOX_LOCALE_DEFAULT:-/etc/default/locale}"
 readonly SYSTEMD_DIR="${RETROBOX_SYSTEMD_DIR:-/etc/systemd/system}"
 readonly OS_RELEASE="${RETROBOX_OS_RELEASE:-/etc/os-release}"
 # the files bash reads for a login shell, in the order it tries them
@@ -380,7 +382,7 @@ remove_old_dropin() {
 # run recorded (a re-run that finds everything in place adds nothing).
 merge_notes() {
   local key line
-  local -a keys=(system_unit polkit_rule keyboard_helper polkit_policy)
+  local -a keys=(system_unit polkit_rule settings_helper polkit_policy)
   # an old autologin drop-in that could not be removed (--no-system) stays on record
   ((SYSTEM == 1)) || keys+=(system_dropin getty_enabled)
   for key in "${keys[@]}"; do
@@ -420,37 +422,38 @@ install_polkit_rule() {
   SYSTEM_NOTES+="polkit_rule=${file}"$'\n'
 }
 
-keyboard_policy_content() {
-  sed -e "s|@HELPER@|${KEYBOARD_HELPER}|" -e "s|@MARK@|Written ${GENERATED_MARK} - do not edit|" \
+helper_policy_content() {
+  sed -e "s|@HELPER@|${SETTINGS_HELPER}|" -e "s|@MARK@|Written ${GENERATED_MARK} - do not edit|" \
     "${SELF_DIR}/share/polkit/${POLICY_NAME}.in"
 }
 
-# Where the keyboard is /etc/default/keyboard (Debian), localed can't set it:
-# retrobox-set-keyboard does, as root, through pkexec and the polkit action of
-# its root-owned copy (the polkit rule grants that action to the user).
-install_keyboard_helper() {
+# Where the keyboard and the language are /etc/default/keyboard and
+# /etc/default/locale (Debian), localed can't set them: retrobox-settings-helper
+# does, as root, through pkexec and the polkit action of its root-owned copy
+# (the polkit rule grants that action to the user).
+install_settings_helper() {
   local policy="${POLKIT_ACTIONS_DIR}/${POLICY_NAME}" tmp
-  [[ -f "${KEYBOARD_FILE}" ]] || return 0
+  [[ -f "${KEYBOARD_FILE}" || -e "${LOCALE_DEFAULT}" ]] || return 0
   if [[ -f "${policy}" ]] && ! is_ours "${policy}"; then
-    ok "keyboard helper in place (the retrobox-system-settings package's)"
+    ok "settings helper in place (the retrobox-system-settings package's)"
     return 0
   fi
   if ! have pkexec; then
-    warn "pkexec is not installed: the keyboard layout can't be set from EmulationStation (apt install pkexec)."
+    warn "pkexec is not installed: the keyboard layout and the language can't be set from EmulationStation (apt install pkexec)."
   fi
   tmp="$(mktemp)"
-  keyboard_policy_content >"${tmp}"
-  if cmp -s -- "${tmp}" "${policy}" && cmp -s -- "${SELF_DIR}/libexec/retrobox-set-keyboard" "${KEYBOARD_HELPER}"; then
+  helper_policy_content >"${tmp}"
+  if cmp -s -- "${tmp}" "${policy}" && cmp -s -- "${SELF_DIR}/libexec/retrobox-settings-helper" "${SETTINGS_HELPER}"; then
     rm -f -- "${tmp}"
-    ok "keyboard helper already in place (${KEYBOARD_HELPER})"
+    ok "settings helper already in place (${SETTINGS_HELPER})"
     return 0
   fi
-  have sudo || die "sudo is needed for the keyboard helper (or use --no-polkit)"
-  info "Installing the keyboard helper and its polkit action (sudo): ${KEYBOARD_HELPER} ${policy}"
-  sudo install -D -m 0755 -- "${SELF_DIR}/libexec/retrobox-set-keyboard" "${KEYBOARD_HELPER}" || die "sudo failed"
+  have sudo || die "sudo is needed for the settings helper (or use --no-polkit)"
+  info "Installing the settings helper and its polkit action (sudo): ${SETTINGS_HELPER} ${policy}"
+  sudo install -D -m 0755 -- "${SELF_DIR}/libexec/retrobox-settings-helper" "${SETTINGS_HELPER}" || die "sudo failed"
   sudo install -D -m 0644 -- "${tmp}" "${policy}" || die "sudo failed"
   rm -f -- "${tmp}"
-  SYSTEM_NOTES+="keyboard_helper=${KEYBOARD_HELPER}"$'\n'"polkit_policy=${policy}"$'\n'
+  SYSTEM_NOTES+="settings_helper=${SETTINGS_HELPER}"$'\n'"polkit_policy=${policy}"$'\n'
 }
 
 report_keyboard() {
@@ -646,7 +649,7 @@ do_install() {
   migrate_old_names
 
   # what an earlier run did to the system, kept when this one has nothing to add
-  PREV_NOTES="$(grep -E '^(system_unit|polkit_rule|keyboard_helper|polkit_policy|system_dropin|getty_enabled)=' "${MANIFEST}" 2>/dev/null || true)"
+  PREV_NOTES="$(grep -E '^(system_unit|polkit_rule|settings_helper|polkit_policy|system_dropin|getty_enabled)=' "${MANIFEST}" 2>/dev/null || true)"
   if prev="$(installed_tty)"; then
     if [[ -n "${TTY_ARG}" ]] && ((10#${TTY_ARG} != 10#${prev})); then
       die "already installed on tty${prev}: run ./install.sh --uninstall before using tty${TTY_ARG}"
@@ -680,7 +683,7 @@ do_install() {
 
   if ((SYSTEM == 1 && POLKIT == 1)); then
     install_polkit_rule
-    install_keyboard_helper
+    install_settings_helper
   fi
 
   case "${DATA_DIR}${CONFIG_DIR}" in
@@ -716,7 +719,7 @@ uninstall_system() {
   unit="$(manifest_get system_unit)"
   rule="$(manifest_get polkit_rule)"
   dropin="$(manifest_get system_dropin)"
-  helper="$(manifest_get keyboard_helper)"
+  helper="$(manifest_get settings_helper)"
   policy="$(manifest_get polkit_policy)"
   [[ -n "${unit}${rule}${dropin}${helper}${policy}" ]] || return 1
   if ((SYSTEM == 0)) || ! have sudo; then
@@ -733,7 +736,7 @@ uninstall_system() {
     info "Removing ${policy} (sudo)..."
     sudo rm -f -- "${policy}"
   fi
-  if [[ -n "${helper}" ]] && grep -qs '^# retrobox-set-keyboard LAYOUT' "${helper}"; then
+  if [[ -n "${helper}" ]] && grep -qs '^# retrobox-settings-helper: ' "${helper}"; then
     info "Removing ${helper} (sudo)..."
     sudo rm -f -- "${helper}"
     sudo rmdir --ignore-fail-on-non-empty -- "$(dirname -- "${helper}")" 2>/dev/null || true

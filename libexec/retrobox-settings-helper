@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# retrobox-settings-helper: sets the system's keyboard layout and language
+# where systemd-localed may not, as root. Run by retrobox-system-settings
+# through pkexec.
+#
+#   retrobox-settings-helper keyboard LAYOUT [VARIANT]
+#   retrobox-settings-helper locale LANGUAGE
+#
+# Debian doesn't let systemd-localed change them (its D-Bus policy,
+# systemd-localed-read-only.conf, rejects SetX11Keyboard and SetLocale): there
+# they are /etc/default/keyboard (keyboard-configuration) and
+# /etc/default/locale, which X (through udev), the text console, PAM and the
+# sessions read when they start. The polkit action
+# org.retroboxproject.system-settings.set is for this program only, and the
+# console's polkit rule (retrobox-polkit-rule) grants it.
+#
+# Only what is checked gets in: an XKB layout and one of its variants (from
+# /usr/share/X11/xkb/rules/evdev.lst) or a UTF-8 locale the system has
+# (locale -a), so nothing else in those files can change.
+set -euo pipefail
+
+KEYBOARD_FILE="${RETROBOX_KEYBOARD_FILE:-/etc/default/keyboard}"
+LOCALE_FILE="${RETROBOX_LOCALE_FILE:-/etc/default/locale}"
+XKB_RULES="${RETROBOX_XKB_RULES:-/usr/share/X11/xkb/rules/evdev.lst}"
+
+fail() {
+  echo "Error: $*"
+  exit 1
+}
+
+# Whether CODE is a "<code> ..." line of the "! SECTION" of XKB's list, its
+# description starting with PREFIX (the variants' "es: ...").
+in_xkb() {
+  local section="$1" code="$2" prefix="${3:-}"
+  [[ "${code}" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || return 1
+  awk -v want="${section}" -v code="${code}" -v prefix="${prefix}" '
+    /^!/ { inside = ($2 == want); next }
+    inside && $1 == code {
+      rest = $0; sub(/^[ \t]*[^ \t]+[ \t]+/, "", rest)
+      if (prefix == "" || index(rest, prefix) == 1) found = 1
+    }
+    END { exit !found }' "${XKB_RULES}"
+}
+
+# KEY="VALUE" in the file: the line replaced, or added at the end
+set_key() {
+  local file="$1" key="$2" value="$3"
+  if grep -q "^[[:space:]]*${key}=" "${file}"; then
+    sed -i "s|^[[:space:]]*${key}=.*|${key}=\"${value}\"|" "${file}"
+  else
+    printf '%s="%s"\n' "${key}" "${value}" >>"${file}"
+  fi
+}
+
+# write_keys FILE KEY VALUE...: the file (where a link points, if it is one)
+# with those keys set, written next to it and moved in place: never half a file
+write_keys() {
+  local file tmp
+  file="$(readlink -f -- "$1")" || fail "cannot resolve $1"
+  shift
+  tmp="$(mktemp "${file}.XXXXXX")" || fail "cannot write $(dirname -- "${file}")"
+  # shellcheck disable=SC2064 # the file's name now, not at exit
+  trap "rm -f -- '${tmp}'" EXIT
+  if [[ -f "${file}" ]]; then
+    cat -- "${file}" >"${tmp}"
+  fi
+  while (($# >= 2)); do
+    set_key "${tmp}" "$1" "$2"
+    shift 2
+  done
+  chmod 0644 -- "${tmp}"
+  mv -f -- "${tmp}" "${file}"
+  trap - EXIT
+}
+
+keyboard() {
+  local layout="$1" variant="${2:-}"
+  [[ "${variant}" == none ]] && variant=""
+  [[ -r "${XKB_RULES}" ]] || fail "no keyboard layouts on this system (${XKB_RULES})"
+  in_xkb layout "${layout}" || fail "unknown keyboard layout '${layout}'"
+  if [[ -n "${variant}" ]] && ! in_xkb variant "${variant}" "${layout}:"; then
+    fail "the keyboard layout '${layout}' has no variant '${variant}'"
+  fi
+  write_keys "${KEYBOARD_FILE}" XKBLAYOUT "${layout}" XKBVARIANT "${variant}"
+  # devices plugged in from now on, and X when it starts, take it from udev
+  if command -v udevadm >/dev/null 2>&1 && [[ -z "${RETROBOX_KEYBOARD_FILE:-}" ]]; then
+    udevadm trigger --subsystem-match=input --action=change >/dev/null 2>&1 || true
+  fi
+}
+
+locale_() {
+  local code="$1" name
+  [[ "${code}" =~ ^[a-z][a-z][a-z]?_[A-Z][A-Z]$ ]] || fail "unknown language '${code}'"
+  # the system's UTF-8 locale of that language (es_ES.utf8), named as Debian
+  # names it in LANG (es_ES.UTF-8)
+  name="$(locale -a 2>/dev/null | awk -v code="${code}" '
+    { lower = tolower($0) }
+    lower == tolower(code) ".utf8" || lower == tolower(code) ".utf-8" { found = 1 }
+    END { exit !found }' && echo "${code}.UTF-8")" || true
+  [[ -n "${name}" ]] || fail "the system has no locale for '${code}' (add ${code}.UTF-8 to /etc/locale.gen and run locale-gen)"
+  write_keys "${LOCALE_FILE}" LANG "${name}"
+}
+
+main() {
+  case "${1:-} $#" in
+  "keyboard 2" | "keyboard 3") keyboard "$2" "${3:-}" ;;
+  "locale 2") locale_ "$2" ;;
+  *) fail "usage: retrobox-settings-helper keyboard LAYOUT [VARIANT] | locale LANGUAGE" ;;
+  esac
+}
+
+main "$@"

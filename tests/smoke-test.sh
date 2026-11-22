@@ -41,7 +41,7 @@ export RETROBOX_SYSTEMD_DIR="${WORK}/systemd"
 export STUB_STATE="${WORK}/state"
 export RETROBOX_POLKIT_DIR="${WORK}/polkit"
 export RETROBOX_POLKIT_ACTIONS_DIR="${WORK}/polkit-actions"
-export RETROBOX_KEYBOARD_HELPER="${WORK}/usr-local/libexec/retrobox-set-keyboard"
+export RETROBOX_SETTINGS_HELPER="${WORK}/usr-local/libexec/retrobox-settings-helper"
 POLICY="${RETROBOX_POLKIT_ACTIONS_DIR}/org.retroboxproject.system-settings.policy"
 mkdir -p "${RETROBOX_SYSTEMD_DIR}" "${STUB_STATE}"
 cat >"${STUBS}/systemctl" <<'SH'
@@ -122,10 +122,10 @@ grep -q "subject.user != \"$(id -un)\"" "${RULE}" && grep -q 'login1.reboot' "${
 grep -q 'manage-units' "${RULE}" && grep -q 'action.lookup("unit") == "retrobox-session-labwc.service"' "${RULE}" || fail "polkit rule does not cover the service"
 grep -q 'timedate1.set-timezone' "${RULE}" && grep -q 'locale1.set-keyboard' "${RULE}" && grep -q 'locale1.set-locale' "${RULE}" \
   || fail "polkit rule does not cover the time zone, keyboard and language"
-grep -q 'org.retroboxproject.system-settings.set-keyboard' "${RULE}" || fail "polkit rule does not cover the keyboard helper"
-cmp -s "${ROOT}/libexec/retrobox-set-keyboard" "${RETROBOX_KEYBOARD_HELPER}" || fail "keyboard helper not installed"
-grep -q "exec.path\">${RETROBOX_KEYBOARD_HELPER}<" "${POLICY}" && grep -q 'id="org.retroboxproject.system-settings.set-keyboard"' "${POLICY}" \
-  || fail "keyboard helper's polkit action wrong: $(cat "${POLICY}")"
+grep -q '"org.retroboxproject.system-settings.set"' "${RULE}" || fail "polkit rule does not cover the settings helper"
+cmp -s "${ROOT}/libexec/retrobox-settings-helper" "${RETROBOX_SETTINGS_HELPER}" || fail "settings helper not installed"
+grep -q "exec.path\">${RETROBOX_SETTINGS_HELPER}<" "${POLICY}" && grep -q 'id="org.retroboxproject.system-settings.set"' "${POLICY}" \
+  || fail "settings helper's polkit action wrong: $(cat "${POLICY}")"
 grep -q "^system_settings = ${DATA}/bin/retrobox-system-settings\$" "${HOME}/.config/retrobox/retrobox.ini.d/50-labwc.ini" || fail "[core] system_settings not written"
 grep -qx 'console_mode = true' "${HOME}/.config/retrobox/retrobox.ini.d/50-labwc.ini" || fail "console mode not turned on"
 [[ "$(readlink -- "${HOME}/.local/bin/retrobox-system-settings")" == "${DATA}/bin/retrobox-system-settings" ]] || fail "retrobox-system-settings not linked"
@@ -145,8 +145,8 @@ pass "the TTY cannot change without uninstall; re-install is idempotent"
 [[ "$(cat "${HOME}/.profile")" == $'# my profile\nexport FOO=1' ]] || fail "profile not restored: $(cat "${HOME}/.profile")"
 [[ ! -e "${UNIT}" && ! -e "${STUB_STATE}/enabled-retrobox-session-labwc.service" ]] || fail "service not removed"
 [[ ! -e "${RULE}" ]] || fail "polkit rule not removed"
-[[ ! -e "${POLICY}" && ! -e "${RETROBOX_KEYBOARD_HELPER}" ]] || fail "keyboard helper or its action not removed"
-pass "uninstall removes the service, the rule and the keyboard helper, and restores the profile"
+[[ ! -e "${POLICY}" && ! -e "${RETROBOX_SETTINGS_HELPER}" ]] || fail "settings helper or its action not removed"
+pass "uninstall removes the service, the rule and the settings helper, and restores the profile"
 
 # --- 5b. an install of the previous version (login hook + autologin drop-in) is migrated ---
 OLD="${RETROBOX_SYSTEMD_DIR}/getty@tty8.service.d/retrobox-labwc.conf"
@@ -449,7 +449,8 @@ chmod +x "${SYS}/bin/pkexec"
 settings() {
   SYS_LOG="${SYS}/log" PATH="${SYS}/bin:${PATH}" RETROBOX_ZONEINFO="${SYS}/zoneinfo" \
     RETROBOX_XKB_RULES="${SYS}/evdev.lst" RETROBOX_KEYBOARD_FILE="${KBFILE:-${SYS}/keyboard}" \
-    RETROBOX_KEYBOARD_HELPERS="${KEYBOARD_HELPERS:-${ROOT}/libexec/retrobox-set-keyboard}" \
+    RETROBOX_SETTINGS_HELPERS="${HELPERS:-${ROOT}/libexec/retrobox-settings-helper}" \
+    RETROBOX_LOCALE_DEFAULT="${LOCALE_DEFAULT:-${SYS}/none}" RETROBOX_LOCALE_FILE="${SYS}/default-locale" \
     RETROBOX_LOCALE_FILES="${LOCALES:-${SYS}/locale}" "${SETTINGS}" "$@"
 }
 export SYS_LOG="${SYS}/log"
@@ -460,19 +461,19 @@ grep -qx 'timedatectl --no-ask-password set-timezone Europe/Madrid' "${SYS}/log"
 [[ "$(settings keyboard list-layouts)" == $'us English (US)\nes Spanish' ]] || fail "layouts: $(settings keyboard list-layouts)"
 [[ "$(settings keyboard list-variants es)" == "winkeys Spanish (Windows)" ]] || fail "variants of es"
 [[ "$(settings keyboard get)" == "es none" ]] || fail "keyboard get: $(settings keyboard get)"
-# Debian (there is a /etc/default/keyboard): retrobox-set-keyboard through pkexec
+# Debian (there is a /etc/default/keyboard): retrobox-settings-helper through pkexec
 settings keyboard set es winkeys || fail "keyboard set"
-grep -qx "pkexec --disable-internal-agent ${ROOT}/libexec/retrobox-set-keyboard es winkeys" "${SYS}/log" || fail "pkexec wrong: $(cat "${SYS}/log")"
+grep -qx "pkexec --disable-internal-agent ${ROOT}/libexec/retrobox-settings-helper keyboard es winkeys" "${SYS}/log" || fail "pkexec wrong: $(cat "${SYS}/log")"
 [[ "$(cat "${SYS}/keyboard")" == $'XKBMODEL="pc105"\nXKBLAYOUT="es"\nXKBVARIANT="winkeys"\nXKBOPTIONS="grp:alt_shift_toggle"' ]] || fail "keyboard file: $(cat "${SYS}/keyboard")"
 [[ "$(settings keyboard get)" == "es winkeys" ]] || fail "keyboard get after set"
 settings keyboard set us none || fail "keyboard set without variant"
 grep -qx 'XKBVARIANT=""' "${SYS}/keyboard" && grep -qx 'XKBLAYOUT="us"' "${SYS}/keyboard" || fail "no variant: $(cat "${SYS}/keyboard")"
 [[ "$(settings keyboard set es dvorak)" == "Error: the keyboard layout 'es' has no variant 'dvorak'" ]] || fail "wrong variant accepted"
-[[ "$(RETROBOX_KEYBOARD_FILE="${SYS}/keyboard" RETROBOX_XKB_RULES="${SYS}/evdev.lst" "${ROOT}/libexec/retrobox-set-keyboard" 'es"; rm -rf /')" == "Error: unknown keyboard layout 'es\"; rm -rf /'" ]] || fail "the helper takes a bad layout"
+[[ "$(RETROBOX_KEYBOARD_FILE="${SYS}/keyboard" RETROBOX_XKB_RULES="${SYS}/evdev.lst" "${ROOT}/libexec/retrobox-settings-helper" keyboard 'es"; rm -rf /')" == "Error: unknown keyboard layout 'es\"; rm -rf /'" ]] || fail "the helper takes a bad layout"
 out="$(DENY=1 settings keyboard set us)" && fail "a refusal must fail"
 [[ "${out}" == "Error: cannot change the keyboard layout: Error executing command as another user: Not authorized (is the polkit rule of install.sh in place?)" ]] || fail "refusal not explained: ${out}"
-out="$(KEYBOARD_HELPERS="${SYS}/none" settings keyboard set us)" && fail "no helper must fail"
-[[ "${out}" == "Error: cannot change the keyboard layout: retrobox-set-keyboard is not installed"* ]] || fail "missing helper not explained: ${out}"
+out="$(HELPERS="${SYS}/none" settings keyboard set us)" && fail "no helper must fail"
+[[ "${out}" == "Error: cannot change the keyboard layout: retrobox-settings-helper is not installed"* ]] || fail "missing helper not explained: ${out}"
 # elsewhere (no /etc/default/keyboard): localed
 KBFILE="${SYS}/none" settings keyboard set es winkeys || fail "keyboard set through localed"
 grep -q '^localectl --no-ask-password set-x11-keymap es .*winkeys' "${SYS}/log" || fail "localectl wrong: $(cat "${SYS}/log")"
@@ -485,6 +486,16 @@ settings locale set es_ES || fail "locale set"
 grep -qx 'localectl --no-ask-password set-locale LANG=es_ES.utf8' "${SYS}/log" || fail "set-locale wrong: $(cat "${SYS}/log")"
 [[ "$(settings locale set de_DE)" == "Error: the system has no locale for 'de_DE'"* ]] || fail "missing locale accepted"
 [[ "$(settings locale set ../x)" == "Error: unknown language '../x'" ]] || fail "bad language accepted"
+# Debian (there is a /etc/default/locale, here a link): the helper, through pkexec
+printf '#!/bin/sh\nprintf "C.utf8\\nen_US.utf8\\nes_ES.utf8\\n"\n' >"${SYS}/bin/locale"
+chmod +x "${SYS}/bin/locale"
+printf '#  File generated by update-locale\n' >"${SYS}/locale.conf"
+ln -s locale.conf "${SYS}/default-locale"
+LOCALE_DEFAULT="${SYS}/default-locale" settings locale set es_ES || fail "locale set through the helper"
+grep -qx "pkexec --disable-internal-agent ${ROOT}/libexec/retrobox-settings-helper locale es_ES" "${SYS}/log" || fail "pkexec wrong: $(cat "${SYS}/log")"
+[[ -L "${SYS}/default-locale" ]] && grep -qx 'LANG="es_ES.UTF-8"' "${SYS}/locale.conf" || fail "locale file: $(cat "${SYS}/locale.conf")"
+out="$(PATH="${SYS}/bin:${PATH}" RETROBOX_LOCALE_FILE="${SYS}/default-locale" "${ROOT}/libexec/retrobox-settings-helper" locale de_DE)" && fail "the helper takes a missing locale"
+[[ "${out}" == "Error: the system has no locale for 'de_DE'"* ]] || fail "missing locale not explained: ${out}"
 pass "retrobox-system-settings reads and sets the system's time zone, keyboard (Debian's file or localed) and language, and says why it can't"
 
 # --- 13. the Openbox session: session.d hooks, the rc.xml, picom and Retrobox -----------------
