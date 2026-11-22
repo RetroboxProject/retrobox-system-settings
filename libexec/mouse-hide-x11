@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Hides the X11 cursor, like batocera's `unclutter-remote -h`. Standalone:
+# copy it anywhere (e.g. a retrobox retrohook), it needs only unclutter.
+#
+# Usage: mouse-hide-x11
+set -euo pipefail
+
+command -v unclutter-remote >/dev/null 2>&1 || { echo "mouse-hide-x11: unclutter is not installed" >&2; exit 1; }
+exec unclutter-remote -h

@@ -509,6 +509,7 @@ while [ $# -gt 0 ]; do [ "$1" = --startup ] && exec "$2"; shift; done
 SH
 printf '#!/bin/sh\necho "picom $*" >>"${OB_LOG}"\n' >"${OB}/bin/picom"
 printf '#!/bin/sh\necho "retrobox $*" >>"${OB_LOG}"\n' >"${OB}/bin/retrobox"
+printf '#!/bin/sh\necho "unclutter-remote $*" >>"${OB_LOG}"\n' >"${OB}/bin/unclutter-remote"
 printf '#!/bin/sh\necho "hook 10" >>"${OB_LOG}"\n' >"${OB}/etc/session.d/10-first"
 printf '#!/bin/sh\necho "hook 20" >>"${OB_LOG}"; exit 3\n' >"${OB}/etc/session.d/20-fails"
 printf 'not run: not executable\n' >"${OB}/etc/session.d/30-text"
@@ -526,6 +527,13 @@ openbox_session || fail "the Openbox session failed: $(cat "${HOME}/.local/state
 grep -q "^openbox --config-file ${OB}/run/retrobox-openbox-rc.xml --startup ${ROOT}/libexec/retrobox-openbox-autostart\$" "${OB_LOG}" || fail "openbox not started right: $(cat "${OB_LOG}")"
 grep -q "${ROOT}/libexec/retrobox-volume up" "${OB}/run/retrobox-openbox-rc.xml" || fail "@LIBEXEC@ not filled in"
 grep -qx 'picom -b --config /dev/null --backend glx --vsync' "${OB_LOG}" && grep -qx 'retrobox ' "${OB_LOG}" || fail "autostart: $(cat "${OB_LOG}")"
+grep -qx 'unclutter-remote -h' "${OB_LOG}" || fail "the mouse cursor is not hidden at session start: $(cat "${OB_LOG}")"
+: >"${OB_LOG}"
+PATH="${OB}/bin:${PATH}" "${ROOT}/libexec/mouse-hide-x11" || fail "mouse-hide-x11 failed"
+grep -qx 'unclutter-remote -h' "${OB_LOG}" || fail "mouse-hide-x11 calls unclutter-remote -h: $(cat "${OB_LOG}")"
+: >"${OB_LOG}"
+PATH="${OB}/bin:${PATH}" "${ROOT}/libexec/mouse-show-x11" || fail "mouse-show-x11 failed"
+grep -qx 'unclutter-remote -s' "${OB_LOG}" || fail "mouse-show-x11 calls unclutter-remote -s: $(cat "${OB_LOG}")"
 grep -q '20-fails failed (status 3), going on' "${HOME}/.local/state/retrobox/logs/openbox-session.log" || fail "a failing hook is not reported"
 printf '<openbox_config/>\n' >"${OB}/etc/openbox/rc.xml"
 mkdir -p "${RETROBOX_SYSCONFDIR}"
@@ -534,7 +542,17 @@ openbox_session || fail "the Openbox session failed with the machine's rc.xml"
 grep -q "^openbox --config-file ${OB}/etc/openbox/rc.xml " "${OB_LOG}" || fail "the machine's rc.xml not used"
 ! grep -q '^picom' "${OB_LOG}" || fail "[openbox] compositor = none still runs picom"
 rm -f "${RETROBOX_SYSCONFDIR}/retrobox.ini"
-pass "the Openbox session runs session.d, picks its rc.xml, then picom and Retrobox"
+rm -f "${OB}/bin/unclutter-remote"
+openbox_session || fail "the Openbox session failed without unclutter"
+grep -q 'mouse cursor: hide failed' "${HOME}/.local/state/retrobox/logs/openbox-session.log" \
+  || fail "missing unclutter is not reported: $(cat "${HOME}/.local/state/retrobox/logs/openbox-session.log")"
+grep -qx 'retrobox ' "${OB_LOG}" || fail "Retrobox did not run without unclutter"
+mkdir -p "${WORK}/bare-x11"
+for need in env bash; do
+  ln -sf "$(PATH="${BASE_PATH}" command -v "${need}")" "${WORK}/bare-x11/${need}"
+done
+expect_fail env PATH="${WORK}/bare-x11" "${ROOT}/libexec/mouse-hide-x11"
+pass "the Openbox session runs session.d, picks its rc.xml, then picom and Retrobox; the mouse is hidden at start"
 
 # --- 14. retrobox-polkit-rule: the same rule for any session ---------------------------------------
 "${ROOT}/libexec/retrobox-polkit-rule" retrobox >"${WORK}/rule" || fail "retrobox-polkit-rule failed"

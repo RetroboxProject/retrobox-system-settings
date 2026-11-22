@@ -110,12 +110,13 @@ build "${stage}" retrobox-session-labwc
 
 ## retrobox-session-openbox
 stage="$(new_package retrobox-session-openbox)"
-add "${stage}" bin/retrobox-openbox-session libexec/retrobox-openbox-autostart share/openbox
+add "${stage}" bin/retrobox-openbox-session libexec/retrobox-openbox-autostart \
+  libexec/mouse-hide-x11 libexec/mouse-show-x11 share/openbox
 mkdir -p "${stage}/usr/share/xsessions"
 cp "${ROOT}/share/xsessions/retrobox-openbox.desktop" "${stage}/usr/share/xsessions/"
 command_link "${stage}" retrobox-openbox-session bin/retrobox-openbox-session
 control "${stage}" retrobox-session-openbox \
-  "retrobox-system-settings (= ${VERSION}), openbox" "picom, pulseaudio-utils" \
+  "retrobox-system-settings (= ${VERSION}), openbox" "picom, pulseaudio-utils, unclutter" \
   "Retrobox as the machine's only interface: Openbox session" \
   "An Openbox (X11) session for a display manager (retrobox-openbox), with" \
   "the picom compositor and Retrobox; a machine adds its own steps in" \

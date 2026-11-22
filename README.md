@@ -96,7 +96,7 @@ For a machine whose display manager logs the console's user in (no TTY service, 
 
 1. runs the executables of `/etc/retrobox-system-settings/session.d/`, then `~/.config/retrobox-openbox/session.d/`, in name order: what the machine's own packages want done at every start (nx-debian puts EmulationStation's defaults for the Switch there). A failing one is logged and skipped.
 2. starts Openbox with the first of `~/.config/retrobox-openbox/rc.xml`, `/etc/retrobox-system-settings/openbox/rc.xml` and this tree's `share/openbox/rc.xml`, which only takes the volume keys (`retrobox-volume`) and the power key (left to logind) so that EmulationStation never sees them.
-3. once Openbox is up, starts the picom compositor (vsync, the overlay's translucency; no config file, so no shadows nor fades) and Retrobox. picom's backend is `[openbox] compositor` in `retrobox.ini`: `glx` (the default), `xrender`, `egl`, or `none` for no compositor. If Retrobox ends, Openbox stays up.
+3. once Openbox is up, hides the mouse cursor (batocera's `unclutter`: the scripts `mouse-hide-x11` and `mouse-show-x11` in `libexec/` show and hide it), then starts the picom compositor (vsync, the overlay's translucency; no config file, so no shadows nor fades) and Retrobox. picom's backend is `[openbox] compositor` in `retrobox.ini`: `glx` (the default), `xrender`, `egl`, or `none` for no compositor. If Retrobox ends, Openbox stays up. Missing `unclutter` is reported and left alone: the console runs with the cursor visible.
 
 Its log is `~/.local/state/retrobox/logs/openbox-session.log`. With no `install.sh`, nothing writes the polkit rule: the machine writes it, with `retrobox-polkit-rule USER > /etc/polkit-1/rules.d/50-retrobox-console.rules` (power off, reboot, time zone, keyboard, language and the settings helper for that user). Retrobox finds `retrobox-system-settings` in `/usr/bin`.
 
@@ -108,6 +108,8 @@ Two small standalone scripts in `libexec/` (they need only `wlrctl`, and `wlr-ra
 - `mouse-show`: puts the pointer in the centre of the screen.
 
 `wlrctl` can only move the pointer relatively, so `mouse-hide` sends it far past the corner (the compositor stops it at the edge) and `mouse-show` goes to the top-left corner and then back half the size of the screen, which it reads from `wlr-randr`.
+
+For the Openbox session (X11), the same roles go through batocera's unclutter: `mouse-hide-x11` hides the cursor with `unclutter-remote -h`, `mouse-show-x11` shows it with `unclutter-remote -s`; the session runs the hide when it starts. Both need only `unclutter`.
 
 ## Headphones
 
