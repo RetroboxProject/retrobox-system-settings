@@ -52,9 +52,9 @@ add() {
   done
 }
 
-# command STAGE NAME TARGET: /usr/bin/NAME -> RETROBOX_PATH/TARGET
+# command STAGE NAME TARGET: /usr/bin/NAME -> /opt/retrobox/TARGET (the tree lives in RETROBOX_PATH, thus absolute)
 command_link() {
-  ln -s "../opt/retrobox/$3" "$1/usr/bin/$2"
+  ln -s "/opt/retrobox/$3" "$1/usr/bin/$2"
 }
 
 # control STAGE NAME DEPENDS RECOMMENDS DESCRIPTION...
