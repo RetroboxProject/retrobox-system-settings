@@ -90,6 +90,16 @@ retrobox-system-settings locale get | list | set LANGUAGE
 
 They are the system's own settings, set with systemd's `timedatectl` and `localectl`, so they end up where the distribution keeps them (`/etc/localtime`; `/etc/default/keyboard` on Debian, which the session reads, and which also sets the text console; `/etc/default/locale` or `/etc/locale.conf`) and are read back from there. The layouts and variants are XKB's (`/usr/share/X11/xkb/rules/evdev.lst`); a new layout keeps the model and options the system had. Debian doesn't let `localed` set the keyboard nor the language (its D-Bus policy, `systemd-localed-read-only.conf`, rejects `SetX11Keyboard` and `SetLocale`), so where there is a `/etc/default/keyboard` or a `/etc/default/locale` the program runs `libexec/retrobox-settings-helper` as root with `pkexec` instead: it only changes `XKBLAYOUT` and `XKBVARIANT` there, to a layout and variant XKB lists, or `LANG`, to a UTF-8 locale the system has. It has its own polkit action, `org.retroboxproject.system-settings.set`, which names a root-owned copy of it: the package's, or the one `install.sh` puts in `/usr/local/libexec/retrobox-system-settings/` (with the action in `/usr/share/polkit-1/actions/`; `--uninstall` removes both). It needs `pkexec` (`apt install pkexec`). A language is a locale's language and territory (`es_ES`), set as `LANG`; only the system's UTF-8 locales are offered (`localectl list-locales`), so on Debian a language must be generated first (add `es_ES.UTF-8 UTF-8` to `/etc/locale.gen` and run `sudo locale-gen`, or `sudo dpkg-reconfigure locales`). EmulationStation offers the ones it has a translation for and follows the system's language. A new time zone applies at once; a new keyboard layout or language when the session starts again, which EmulationStation offers. No password is asked: the polkit rule below lets your user do these three things. When it can't (no systemd, no rule), EmulationStation shows why.
 
+### XDP DNS (DNS over TLS)
+
+The *Network settings* also offer **XDP DNS** as a toggle (retrobox-emulationstation's patch 0021), the frontend of `bin/retrobox-xdp-dns`, linked and packaged like the program above:
+
+```
+retrobox-xdp-dns on | off | status
+```
+
+`on` writes systemd-resolved's drop-in `/etc/systemd/resolved.conf.d/26-putotebas.conf` — XDP's servers `85.208.114.51` and `2a0e:97c0:c40::51` (`dns.xdp.es`), `DNSOverTLS=yes`, `DNSSEC=allow-downgrade` — and restarts `systemd-resolved`; `off` removes the file and restarts it; `status` prints `on` or `off` (the file is there or not), which is what EmulationStation shows (no `retrobox-xdp-dns` on the machine, no toggle). The root part goes through `pkexec` and `retrobox-settings-helper` (the same polkit action, so the console's user needs no password), and the file's content is fixed in the helper: nothing of the caller's gets into it. NetworkManager is left alone and the two coexist: it keeps managing the links and handing their DHCP DNS to resolved per link; the drop-in only adds the global servers, so `off` puts everything back exactly as it was. `status` warns when `systemd-resolved` isn't running or `/etc/resolv.conf` isn't its stub (`127.0.0.53`), where the drop-in would change nothing.
+
 ## Openbox session
 
 For a machine whose display manager logs the console's user in (no TTY service, no `install.sh`): install `retrobox-session-openbox` and choose its session, `retrobox-openbox` (lightdm: `autologin-session=retrobox-openbox`). `retrobox-openbox-session` then:
@@ -146,7 +156,7 @@ The session log is `~/.local/state/retrobox/logs/labwc-session.log`; the service
 
 ```
 install.sh    the installer: --check, install, --uninstall
-bin/          retrobox-session-labwc, retrobox-openbox-session, retrobox-system-settings
+bin/          retrobox-session-labwc, retrobox-openbox-session, retrobox-system-settings, retrobox-xdp-dns
 libexec/      display switcher, audio jack, mouse-hide, mouse-show, mouse-hide-x11, mouse-show-x11,
               retrobox-common.sh (settings, keyboard), retrobox-openbox-autostart,
               retrobox-polkit-rule, retrobox-settings-helper, retrobox-volume

@@ -7,12 +7,13 @@
   <vendor_url>https://github.com/RetroboxProject/retrobox-system-settings</vendor_url>
 
   <!-- retrobox-settings-helper, run with pkexec by retrobox-system-settings
-       where localed may not set the keyboard and the language (Debian). An
-       administrator's, by default; the console's polkit rule gives it to the
-       console's user. -->
+       where localed may not set the keyboard and the language (Debian), and
+       by retrobox-xdp-dns for XDP's DNS over TLS (systemd-resolved's
+       drop-in). An administrator's, by default; the console's polkit rule
+       gives it to the console's user. -->
   <action id="org.retroboxproject.system-settings.set">
-    <description>Set the system's keyboard layout and language</description>
-    <message>Authentication is required to set the system's keyboard layout and language.</message>
+    <description>Set the system's keyboard layout, language and XDP DNS</description>
+    <message>Authentication is required to set the system's keyboard layout, language and XDP DNS.</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>

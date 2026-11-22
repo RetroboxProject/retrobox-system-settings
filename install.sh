@@ -77,6 +77,7 @@ readonly MANIFEST="${DATA_DIR}/.install-manifest"
 readonly BIN_DIR="${HOME}/.local/bin"
 readonly SESSION_LINK="${BIN_DIR}/retrobox-session-labwc"
 readonly SETTINGS_LINK="${BIN_DIR}/retrobox-system-settings"
+readonly XDP_DNS_LINK="${BIN_DIR}/retrobox-xdp-dns"
 readonly POLKIT_DIR="${RETROBOX_POLKIT_DIR:-/etc/polkit-1/rules.d}"
 # Debian's keyboard and language (/etc/default/keyboard, /etc/default/locale)
 # are set by retrobox-settings-helper with pkexec: a copy of it root's, and the
@@ -699,6 +700,7 @@ do_install() {
   mkdir -p -- "${BIN_DIR}"
   ln -sfn -- "${DATA_DIR}/bin/retrobox-session-labwc" "${SESSION_LINK}"
   ln -sfn -- "${DATA_DIR}/bin/retrobox-system-settings" "${SETTINGS_LINK}"
+  ln -sfn -- "${DATA_DIR}/bin/retrobox-xdp-dns" "${XDP_DNS_LINK}"
   [[ ":${PATH}:" == *":${BIN_DIR}:"* ]] || warn "${BIN_DIR} is not in your PATH (retrobox-session-labwc is linked there)."
 
   merge_notes
@@ -777,6 +779,9 @@ do_uninstall() {
   fi
   if [[ -L "${SETTINGS_LINK}" && "$(readlink -- "${SETTINGS_LINK}")" == "${DATA_DIR}/"* ]]; then
     rm -f -- "${SETTINGS_LINK}"
+  fi
+  if [[ -L "${XDP_DNS_LINK}" && "$(readlink -- "${XDP_DNS_LINK}")" == "${DATA_DIR}/"* ]]; then
+    rm -f -- "${XDP_DNS_LINK}"
   fi
   if [[ -L "${SESSION_LINK}" && "$(readlink -- "${SESSION_LINK}")" == "${DATA_DIR}/"* ]]; then
     rm -f -- "${SESSION_LINK}"

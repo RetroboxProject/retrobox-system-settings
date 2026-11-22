@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# retrobox-xdp-dns: XDP's DNS over TLS (dns.xdp.es), on or off, as a drop-in
+# of systemd-resolved. The terminal command behind the DNS toggle in
+# EmulationStation's network settings (retrobox-emulationstation patch 0021);
+# just as usable by hand or over ssh.
+#
+#   retrobox-xdp-dns on | off | status
+#
+# on writes /etc/systemd/resolved.conf.d/26-putotebas.conf (XDP's global
+# servers 85.208.114.51 and 2a0e:97c0:c40::51, DNSOverTLS=yes, DNSSEC
+# allow-downgrade) and restarts systemd-resolved; off removes the file and
+# restarts it; status prints "on" or "off" (the file is there or not) and
+# exits 0. The writing and the restart run as root through pkexec and
+# retrobox-settings-helper (the polkit action
+# org.retroboxproject.system-settings.set, which the console's polkit rule
+# grants without a password), or directly when already root.
+#
+# NetworkManager is left alone and the two coexist: it keeps managing the
+# links and handing their DHCP DNS to systemd-resolved per link; the drop-in
+# only adds resolved's global servers, so off puts everything back exactly as
+# it was. status warns on stderr when systemd-resolved is not running or
+# /etc/resolv.conf is not its stub, where the drop-in would change nothing.
+#
+# A failure exits with 1 and its last line is "Error: <why>", which
+# EmulationStation shows.
+set -euo pipefail
+
+SELF="$(readlink -f -- "${BASH_SOURCE[0]}")"
+readonly SELF
+SELF_DIR="$(dirname -- "${SELF}")"
+readonly SELF_DIR
+
+RESOLVED_DROPIN="${RETROBOX_RESOLVED_DROPIN:-/etc/systemd/resolved.conf.d/26-putotebas.conf}"
+RESOLV_CONF="${RETROBOX_RESOLV_CONF:-/etc/resolv.conf}"
+# where the package and install.sh put retrobox-settings-helper (root's, for pkexec)
+SETTINGS_HELPERS="${RETROBOX_SETTINGS_HELPERS:-/opt/retrobox/libexec/retrobox-settings-helper /usr/local/libexec/retrobox-system-settings/retrobox-settings-helper}"
+
+fail() {
+  echo "Error: $*"
+  exit 1
+}
+
+usage() {
+  sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# The coexistence with systemd-resolved and NetworkManager, looked at, never
+# enforced: warnings on stderr only, so EmulationStation's state stays clean.
+check_resolved() {
+  if have systemctl && ! systemctl is-active --quiet systemd-resolved.service 2>/dev/null; then
+    echo "Warning: systemd-resolved is not running: the XDP DNS drop-in has no effect" >&2
+  elif [[ -e "${RESOLV_CONF}" ]] && ! grep -q 127.0.0.53 "${RESOLV_CONF}" 2>/dev/null; then
+    echo "Warning: ${RESOLV_CONF} is not systemd-resolved's stub: programs may ask the DHCP DNS directly" >&2
+  fi
+}
+
+# set_dns on|off: retrobox-settings-helper writes or removes the drop-in and
+# restarts systemd-resolved. Root already: the helper next to this script,
+# directly (no polkitd needed over ssh). Otherwise a root-owned installed
+# copy, through pkexec (its polkit action).
+set_dns() {
+  local state="$1" sibling="${SELF_DIR}/../libexec/retrobox-settings-helper" path="" out
+  if [[ ${EUID} -eq 0 ]]; then
+    [[ -x "${sibling}" ]] || fail "cannot change the DNS: no retrobox-settings-helper next to this script (${sibling})"
+    "${sibling}" xdp-dns "${state}"
+    return 0
+  fi
+  for path in ${SETTINGS_HELPERS}; do
+    [[ -x "${path}" ]] && break
+    path=""
+  done
+  [[ -n "${path}" ]] || fail "cannot change the DNS: retrobox-settings-helper is not installed (install.sh, or the retrobox-system-settings package)"
+  if ! out="$(pkexec --disable-internal-agent "${path}" xdp-dns "${state}" 2>&1)"; then
+    out="$(printf '%s\n' "${out}" | sed '/^$/d' | tail -n 1)"
+    case "${out,,}" in
+    *authoriz* | *authentication*) out+=" (is the polkit rule of install.sh in place?)" ;;
+    *) ;;
+    esac
+    fail "cannot change the DNS: ${out:-pkexec failed}"
+  fi
+}
+
+status() {
+  check_resolved
+  if [[ -f "${RESOLVED_DROPIN}" ]]; then
+    echo on
+  else
+    echo off
+  fi
+}
+
+main() {
+  case "${1:-} $#" in
+  "on 1" | "off 1") set_dns "$1" ;;
+  "status 1") status ;;
+  "-h 1" | "--help 1") usage ;;
+  *) usage 2 >&2 ;;
+  esac
+}
+
+main "$@"

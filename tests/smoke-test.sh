@@ -500,6 +500,44 @@ out="$(PATH="${SYS}/bin:${PATH}" RETROBOX_LOCALE_FILE="${SYS}/default-locale" "$
 [[ "${out}" == "Error: the system has no locale for 'de_DE'"* ]] || fail "missing locale not explained: ${out}"
 pass "retrobox-system-settings reads and sets the system's time zone, keyboard (Debian's file or localed) and language, and says why it can't"
 
+# --- 12b. retrobox-xdp-dns: XDP's DNS over TLS on, off and status ---------------------------
+XDP="${ROOT}/bin/retrobox-xdp-dns"
+DROPIN="${SYS}/resolved.conf.d/26-putotebas.conf"
+# systemd-resolved runs, says the stand-in systemctl, and resolv.conf is its stub: no warnings
+printf '#!/bin/sh\necho "systemctl $*" >>"${SYS_LOG}"\nexit 0\n' >"${SYS}/bin/systemctl"
+chmod +x "${SYS}/bin/systemctl"
+printf 'nameserver 127.0.0.53\n' >"${SYS}/resolv.conf"
+xdp() {
+  SYS_LOG="${SYS}/log" PATH="${SYS}/bin:${PATH}" RETROBOX_RESOLVED_DROPIN="${DROPIN}" \
+    RETROBOX_RESOLV_CONF="${SYS}/resolv.conf" \
+    RETROBOX_SETTINGS_HELPERS="${HELPERS:-${ROOT}/libexec/retrobox-settings-helper}" "${XDP}" "$@"
+}
+[[ "$(xdp status)" == "off" ]] || fail "xdp-dns status with no drop-in: $(xdp status)"
+xdp on || fail "xdp-dns on"
+[[ "$(cat "${DROPIN}")" == $'[Resolve]\nDNS=85.208.114.51#dns.xdp.es 2a0e:97c0:c40::51#dns.xdp.es\nDNSOverTLS=yes\nDNSSEC=allow-downgrade' ]] \
+  || fail "the drop-in is not XDP's: $(cat "${DROPIN}")"
+[[ "$(xdp status)" == "on" ]] || fail "xdp-dns status with the drop-in"
+if [[ ${EUID} -ne 0 ]]; then
+  grep -qx "pkexec --disable-internal-agent ${ROOT}/libexec/retrobox-settings-helper xdp-dns on" "${SYS}/log" \
+    || fail "xdp-dns does not go through pkexec: $(cat "${SYS}/log")"
+fi
+xdp off || fail "xdp-dns off"
+[[ "$(xdp status)" == "off" && ! -e "${DROPIN}" ]] || fail "xdp-dns off leaves the drop-in"
+[[ -z "$(xdp status 2>&1 >/dev/null)" ]] || fail "warnings with resolved running and its stub: $(xdp status 2>&1 >/dev/null)"
+printf 'nameserver 8.8.8.8\n' >"${SYS}/resolv.conf"
+[[ "$(xdp status 2>&1 >/dev/null)" == *"not systemd-resolved's stub"* ]] || fail "a foreign resolv.conf is not warned about"
+expect_fail xdp banana
+if [[ ${EUID} -ne 0 ]]; then
+  out="$(DENY=1 xdp on)" && fail "a refusal must fail"
+  [[ "${out}" == "Error: cannot change the DNS: Error executing command as another user: Not authorized (is the polkit rule of install.sh in place?)" ]] \
+    || fail "refusal not explained: ${out}"
+  out="$(HELPERS="${SYS}/none" xdp on)" && fail "no helper must fail"
+  [[ "${out}" == "Error: cannot change the DNS: retrobox-settings-helper is not installed"* ]] || fail "missing helper not explained: ${out}"
+fi
+out="$(RETROBOX_RESOLVED_DROPIN="${DROPIN}" "${ROOT}/libexec/retrobox-settings-helper" xdp-dns banana)" && fail "the helper takes a bad state"
+[[ "${out}" == "Error: usage: retrobox-settings-helper xdp-dns on|off" ]] || fail "bad state not explained: ${out}"
+pass "retrobox-xdp-dns writes and removes systemd-resolved's XDP drop-in (26-putotebas.conf), says on or off, and warns when resolved is out of the loop"
+
 # --- 13. the Openbox session: session.d hooks, the rc.xml, picom and Retrobox -----------------
 OB="${WORK}/openbox"
 mkdir -p "${OB}/bin" "${OB}/etc/session.d" "${OB}/etc/openbox" "${OB}/run"

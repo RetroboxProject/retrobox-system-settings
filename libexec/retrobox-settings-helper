@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # retrobox-settings-helper: sets the system's keyboard layout and language
-# where systemd-localed may not, as root. Run by retrobox-system-settings
-# through pkexec.
+# where systemd-localed may not, and turns XDP's DNS over TLS on and off,
+# as root. Run by retrobox-system-settings and retrobox-xdp-dns through
+# pkexec.
 #
 #   retrobox-settings-helper keyboard LAYOUT [VARIANT]
 #   retrobox-settings-helper locale LANGUAGE
+#   retrobox-settings-helper xdp-dns on|off
 #
 # Debian doesn't let systemd-localed change them (its D-Bus policy,
 # systemd-localed-read-only.conf, rejects SetX11Keyboard and SetLocale): there
@@ -17,11 +19,19 @@
 # Only what is checked gets in: an XKB layout and one of its variants (from
 # /usr/share/X11/xkb/rules/evdev.lst) or a UTF-8 locale the system has
 # (locale -a), so nothing else in those files can change.
+#
+# xdp-dns writes (on) or removes (off) systemd-resolved's drop-in
+# 26-putotebas.conf — XDP's global servers, DNS over TLS — and restarts
+# systemd-resolved so it takes effect. The file's content is fixed here:
+# nothing of the caller's gets into it. NetworkManager is not touched (it
+# keeps the links and hands their DHCP DNS to resolved per link), so the two
+# coexist and removing the file puts everything back as it was.
 set -euo pipefail
 
 KEYBOARD_FILE="${RETROBOX_KEYBOARD_FILE:-/etc/default/keyboard}"
 LOCALE_FILE="${RETROBOX_LOCALE_FILE:-/etc/default/locale}"
 XKB_RULES="${RETROBOX_XKB_RULES:-/usr/share/X11/xkb/rules/evdev.lst}"
+RESOLVED_DROPIN="${RETROBOX_RESOLVED_DROPIN:-/etc/systemd/resolved.conf.d/26-putotebas.conf}"
 
 fail() {
   echo "Error: $*"
@@ -101,11 +111,45 @@ locale_() {
   write_keys "${LOCALE_FILE}" LANG "${name}"
 }
 
+# XDP's DNS over TLS: the drop-in written whole (never half a file) or removed,
+# and systemd-resolved restarted (not when testing with RETROBOX_RESOLVED_DROPIN,
+# where there is no service to restart)
+xdp_dns() {
+  local state="$1" dir tmp
+  case "${state}" in
+  on)
+    dir="$(dirname -- "${RESOLVED_DROPIN}")"
+    mkdir -p -- "${dir}" || fail "cannot create ${dir}"
+    tmp="$(mktemp "${RESOLVED_DROPIN}.XXXXXX")" || fail "cannot write ${dir}"
+    # shellcheck disable=SC2064 # the file's name now, not at exit
+    trap "rm -f -- '${tmp}'" EXIT
+    cat >"${tmp}" <<'CONF'
+[Resolve]
+DNS=85.208.114.51#dns.xdp.es 2a0e:97c0:c40::51#dns.xdp.es
+DNSOverTLS=yes
+DNSSEC=allow-downgrade
+CONF
+    chmod 0644 -- "${tmp}"
+    mv -f -- "${tmp}" "${RESOLVED_DROPIN}"
+    trap - EXIT
+    ;;
+  off)
+    rm -f -- "${RESOLVED_DROPIN}"
+    ;;
+  *) fail "usage: retrobox-settings-helper xdp-dns on|off" ;;
+  esac
+  if [[ -z "${RETROBOX_RESOLVED_DROPIN:-}" ]]; then
+    systemctl restart systemd-resolved.service \
+      || fail "systemd-resolved did not restart (is it installed and enabled?)"
+  fi
+}
+
 main() {
   case "${1:-} $#" in
   "keyboard 2" | "keyboard 3") keyboard "$2" "${3:-}" ;;
   "locale 2") locale_ "$2" ;;
-  *) fail "usage: retrobox-settings-helper keyboard LAYOUT [VARIANT] | locale LANGUAGE" ;;
+  "xdp-dns 2") xdp_dns "$2" ;;
+  *) fail "usage: retrobox-settings-helper keyboard LAYOUT [VARIANT] | locale LANGUAGE | xdp-dns on|off" ;;
   esac
 }
 

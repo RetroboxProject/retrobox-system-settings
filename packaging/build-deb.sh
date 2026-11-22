@@ -80,8 +80,8 @@ build() {
 
 ## retrobox-system-settings
 stage="$(new_package retrobox-system-settings)"
-add "${stage}" bin/retrobox-system-settings libexec/retrobox-polkit-rule libexec/retrobox-volume \
-  libexec/retrobox-common.sh libexec/retrobox-settings-helper
+add "${stage}" bin/retrobox-system-settings bin/retrobox-xdp-dns libexec/retrobox-polkit-rule \
+  libexec/retrobox-volume libexec/retrobox-common.sh libexec/retrobox-settings-helper
 # the polkit action of retrobox-settings-helper (Debian's keyboard and language, with pkexec)
 mkdir -p "${stage}/usr/share/polkit-1/actions"
 sed -e "s|@HELPER@|/${RETROBOX_PATH}/libexec/retrobox-settings-helper|" \
@@ -90,14 +90,16 @@ sed -e "s|@HELPER@|/${RETROBOX_PATH}/libexec/retrobox-settings-helper|" \
   >"${stage}/usr/share/polkit-1/actions/org.retroboxproject.system-settings.policy"
 cp "${ROOT}/README.md" "${stage}/usr/share/doc/retrobox-system-settings/"
 command_link "${stage}" retrobox-system-settings bin/retrobox-system-settings
+command_link "${stage}" retrobox-xdp-dns bin/retrobox-xdp-dns
 command_link "${stage}" retrobox-polkit-rule libexec/retrobox-polkit-rule
 control "${stage}" retrobox-system-settings "bash, systemd" \
   "retrobox-core, polkitd, pkexec, xkb-data, tzdata, wireplumber | pulseaudio-utils" \
   "Retrobox as the machine's only interface: common part" \
   "What every Retrobox console needs, whichever its session:" \
   "retrobox-system-settings, which sets the system's time zone and keyboard" \
-  "layout from EmulationStation's console mode, and retrobox-polkit-rule, the" \
-  "polkit rule that lets the console's user do that, power off and reboot."
+  "layout from EmulationStation's console mode, retrobox-xdp-dns, XDP's DNS" \
+  "over TLS on and off (its network settings' toggle), and retrobox-polkit-rule," \
+  "the polkit rule that lets the console's user do that, power off and reboot."
 build "${stage}" retrobox-system-settings
 
 ## retrobox-session-labwc
