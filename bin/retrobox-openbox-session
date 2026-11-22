@@ -6,13 +6,13 @@
 # Before Openbox, it runs the executables of the session.d folders, in name
 # order (the system's first, then the user's): what the machine's own
 # packages want done at every start, such as defaults for EmulationStation.
-#   /etc/retrobox-system-settings/session.d/
+#   /etc/retrobox/session.d/
 #   ~/.config/retrobox-openbox/session.d/
 # A failing one is reported and skipped.
 #
 # Openbox's rc.xml is the first of:
 #   ~/.config/retrobox-openbox/rc.xml        the user's
-#   /etc/retrobox-system-settings/openbox/rc.xml   the machine's
+#   /etc/retrobox/openbox/rc.xml             the machine's
 #   share/openbox/rc.xml                      this tree's (volume and power keys),
 #                                             with @LIBEXEC@ filled in
 # Then Openbox runs libexec/retrobox-openbox-autostart (the compositor, and
@@ -20,7 +20,7 @@
 set -euo pipefail
 
 SELF_DIR="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd -P)"
-SYSCONF="${RETROBOX_SYSTEM_SETTINGS_SYSCONFDIR:-/etc/retrobox-system-settings}"
+SYSCONF="${RETROBOX_SYSCONFDIR:-/etc/retrobox}"
 USER_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox-openbox"
 STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/retrobox/logs"
 

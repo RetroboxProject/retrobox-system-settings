@@ -39,7 +39,7 @@ KEYBOARD_FILE="${RETROBOX_KEYBOARD_FILE:-/etc/default/keyboard}"
 # Debian's language file: where there is one, the helper sets the language
 LOCALE_DEFAULT="${RETROBOX_LOCALE_DEFAULT:-/etc/default/locale}"
 # where the package and install.sh put retrobox-settings-helper (root's, for pkexec)
-SETTINGS_HELPERS="${RETROBOX_SETTINGS_HELPERS:-/usr/share/retrobox-system-settings/libexec/retrobox-settings-helper /usr/local/libexec/retrobox-system-settings/retrobox-settings-helper}"
+SETTINGS_HELPERS="${RETROBOX_SETTINGS_HELPERS:-/opt/retrobox/libexec/retrobox-settings-helper /usr/local/libexec/retrobox-system-settings/retrobox-settings-helper}"
 LOCALTIME="${RETROBOX_LOCALTIME:-/etc/localtime}"
 LOCALE_FILES="${RETROBOX_LOCALE_FILES:-/etc/default/locale /etc/locale.conf}"
 

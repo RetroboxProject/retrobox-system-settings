@@ -4,7 +4,7 @@
      ask to configure a keyboard when it saw them) and does what they say:
      the volume through retrobox-volume (Retrobox's overlay when it is there),
      the power key is left to logind (it only must not reach EmulationStation).
-     A machine's own rc.xml goes in /etc/retrobox-system-settings/openbox/. -->
+     A machine's own rc.xml goes in /etc/retrobox/openbox/. -->
 <openbox_config xmlns="http://openbox.org/3.4/rc">
   <keyboard>
     <keybind key="XF86AudioRaiseVolume">

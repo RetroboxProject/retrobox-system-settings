@@ -43,7 +43,7 @@ git clone https://github.com/RetroboxProject/retrobox-system-settings && cd retr
 ./install.sh --tty 1        # --check --tty 1 only checks; --force installs even if a check fails
 ```
 
-Or, on Debian, with the packages of a [release](../../releases) (or `packaging/build-deb.sh`), which pull what the session needs through apt and put this tree in `/usr/share/retrobox-system-settings`; then, as the user who plays:
+Or, on Debian, with the packages of a [release](../../releases) (or `packaging/build-deb.sh`), which pull what the session needs through apt and put this tree in `/opt/retrobox` (the retrobox layout); then, as the user who plays:
 
 ```bash
 sudo apt install ./retrobox-system-settings_*_all.deb ./retrobox-session-labwc_*_all.deb
@@ -94,9 +94,9 @@ They are the system's own settings, set with systemd's `timedatectl` and `locale
 
 For a machine whose display manager logs the console's user in (no TTY service, no `install.sh`): install `retrobox-session-openbox` and choose its session, `retrobox-openbox` (lightdm: `autologin-session=retrobox-openbox`). `retrobox-openbox-session` then:
 
-1. runs the executables of `/etc/retrobox-system-settings/session.d/`, then `~/.config/retrobox-openbox/session.d/`, in name order: what the machine's own packages want done at every start (nx-debian puts EmulationStation's defaults for the Switch there). A failing one is logged and skipped.
-2. starts Openbox with the first of `~/.config/retrobox-openbox/rc.xml`, `/etc/retrobox-system-settings/openbox/rc.xml` and this tree's `share/openbox/rc.xml`, which only takes the volume keys (`retrobox-volume`) and the power key (left to logind) so that EmulationStation never sees them.
-3. once Openbox is up, starts the picom compositor (vsync, the overlay's translucency; no config file, so no shadows nor fades) and Retrobox. picom's backend is `[openbox] compositor` in `retrobox.ini`: `glx` (the default), `xrender`, `egl`, or `none` for no compositor. If Retrobox ends, Openbox stays up.
+1. runs the executables of `/etc/retrobox/session.d/`, then `~/.config/retrobox-openbox/session.d/`, in name order: what the machine's own packages want done at every start (nx-debian puts EmulationStation's defaults for the Switch there). A failing one is logged and skipped.
+2. starts Openbox with the first of `~/.config/retrobox-openbox/rc.xml`, `/etc/retrobox/openbox/rc.xml` and this tree's `share/openbox/rc.xml`, which only takes the volume keys (`retrobox-volume`) and the power key (left to logind) so that EmulationStation never sees them.
+3. once Openbox is up, hides the mouse cursor (batocera's unclutter: the scripts `mouse-hide-x11` and `mouse-show-x11` in `libexec/` show and hide it with Debian's `unclutter-xfixes`), then starts the picom compositor (vsync, the overlay's translucency; no config file, so no shadows nor fades) and Retrobox. picom's backend is `[openbox] compositor` in `retrobox.ini`: `glx` (the default), `xrender`, `egl`, or `none` for no compositor. If Retrobox ends, Openbox stays up. Missing `unclutter-xfixes` is reported and left alone: the console runs with the cursor visible.
 
 Its log is `~/.local/state/retrobox/logs/openbox-session.log`. With no `install.sh`, nothing writes the polkit rule: the machine writes it, with `retrobox-polkit-rule USER > /etc/polkit-1/rules.d/50-retrobox-console.rules` (power off, reboot, time zone, keyboard, language and the settings helper for that user). Retrobox finds `retrobox-system-settings` in `/usr/bin`.
 
@@ -108,6 +108,8 @@ Two small standalone scripts in `libexec/` (they need only `wlrctl`, and `wlr-ra
 - `mouse-show`: puts the pointer in the centre of the screen.
 
 `wlrctl` can only move the pointer relatively, so `mouse-hide` sends it far past the corner (the compositor stops it at the edge) and `mouse-show` goes to the top-left corner and then back half the size of the screen, which it reads from `wlr-randr`.
+
+For the Openbox session (X11), the same roles go through batocera's unclutter (Debian's `unclutter-xfixes`, the XFixes-based rewrite: there is no `unclutter-remote`): `mouse-hide-x11` kills a running `unclutter-xfixes` and starts a fresh one hidden at once (`--start-hidden --fork`), `mouse-show-x11` kills it (the X server undoes the hide of the client that died, so the cursor comes back); the session runs the hide when it starts. Both need only `unclutter-xfixes`; `mouse-show-x11` also runs with it absent (the cursor is visible then anyway).
 
 ## Headphones
 
@@ -145,13 +147,20 @@ The session log is `~/.local/state/retrobox/logs/labwc-session.log`; the service
 ```
 install.sh    the installer: --check, install, --uninstall
 bin/          retrobox-session-labwc, retrobox-openbox-session, retrobox-system-settings
-libexec/      display switcher, mouse-hide, mouse-show, retrobox-common.sh (settings, keyboard),
-              retrobox-openbox-autostart, retrobox-polkit-rule, retrobox-settings-helper,
-              retrobox-volume
+libexec/      display switcher, audio jack, mouse-hide, mouse-show, mouse-hide-x11, mouse-show-x11,
+              retrobox-common.sh (settings, keyboard), retrobox-openbox-autostart,
+              retrobox-polkit-rule, retrobox-settings-helper, retrobox-volume
 share/        labwc config templates, Openbox's rc.xml, the xsession entry, the polkit action
 tests/        smoke-test.sh (stand-in commands, throwaway HOME)
 packaging/    build-deb.sh (the three packages; .github/workflows/build.yml publishes them)
 ```
+
+The packages put the tree in `/opt/retrobox` (like retrobox-core). What must
+stay in /usr stays there: the `/usr/bin/` symlinks to `/opt/retrobox`, the xsession
+entry (`/usr/share/xsessions`), the polkit action
+(`/usr/share/polkit-1/actions`) and the docs (`/usr/share/doc`). Machine configuration
+(session.d hooks, the machine's rc.xml) lives in `/etc/retrobox` and is not
+shipped: it belongs to the machine, not to the package.
 
 ## License
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the Debian packages of this tree, all in /usr/share/retrobox-system-settings:
+# Builds the Debian packages of this tree, all in /opt/retrobox:
 #
 #   retrobox-system-settings   what every console needs: retrobox-system-settings
 #                              (time zone, keyboard), retrobox-polkit-rule,
@@ -8,6 +8,12 @@
 #                              up per user: retrobox-session-install --tty N)
 #   retrobox-session-openbox   the Openbox (X11) session for a display manager
 #                              (/usr/share/xsessions/retrobox-openbox.desktop)
+#
+# The tree lives in /opt/retrobox (the retrobox layout); only what must be in
+# /usr does so: the /usr/bin symlinks and the .desktop file and the polkit
+# action, which the session and the desktop manager look up in /usr. The
+# machine's configuration (session.d, the Openbox rc.xml) goes in
+# /etc/retrobox, and is not shipped here.
 #
 #   packaging/build-deb.sh [VERSION] [OUTPUT_DIR]
 #
@@ -21,7 +27,7 @@ VERSION="${1:-$(git -C "${ROOT}" describe --tags --abbrev=0 2>/dev/null || echo 
 VERSION="${VERSION#v}"
 OUT="${2:-${ROOT}/dist}"
 [[ "${VERSION}" =~ ^[0-9][0-9A-Za-z.+~-]*$ ]] || { echo "build-deb: bad version '${VERSION}'" >&2; exit 1; }
-readonly SHARE_PATH="usr/share/retrobox-system-settings"
+readonly RETROBOX_PATH="opt/retrobox"
 readonly HOMEPAGE="https://github.com/RetroboxProject/retrobox-system-settings"
 
 WORK="$(mktemp -d)"
@@ -30,25 +36,25 @@ trap 'rm -rf "${WORK}"' EXIT
 # new_package NAME: an empty package tree, printed
 new_package() {
   local stage="${WORK}/$1"
-  mkdir -p "${stage}/DEBIAN" "${stage}/${SHARE_PATH}" "${stage}/usr/bin" "${stage}/usr/share/doc/$1"
+  mkdir -p "${stage}/DEBIAN" "${stage}/${RETROBOX_PATH}" "${stage}/usr/bin" "${stage}/usr/share/doc/$1"
   chmod 0755 "${stage}"
   cp "${ROOT}/LICENSE" "${stage}/usr/share/doc/$1/copyright"
   printf '%s\n' "${stage}"
 }
 
-# add STAGE PATH...: files or folders of this tree, at the same place under SHARE_PATH
+# add STAGE PATH...: files or folders of this tree, at the same place under RETROBOX_PATH
 add() {
   local stage="$1" item
   shift
   for item in "$@"; do
-    mkdir -p "${stage}/${SHARE_PATH}/$(dirname -- "${item}")"
-    cp -a "${ROOT}/${item}" "${stage}/${SHARE_PATH}/${item}"
+    mkdir -p "${stage}/${RETROBOX_PATH}/$(dirname -- "${item}")"
+    cp -a "${ROOT}/${item}" "${stage}/${RETROBOX_PATH}/${item}"
   done
 }
 
-# command STAGE NAME TARGET: /usr/bin/NAME -> SHARE_PATH/TARGET
+# command STAGE NAME TARGET: /usr/bin/NAME -> RETROBOX_PATH/TARGET
 command_link() {
-  ln -s "../share/retrobox-system-settings/$3" "$1/usr/bin/$2"
+  ln -s "../opt/retrobox/$3" "$1/usr/bin/$2"
 }
 
 # control STAGE NAME DEPENDS RECOMMENDS DESCRIPTION...
@@ -78,7 +84,7 @@ add "${stage}" bin/retrobox-system-settings libexec/retrobox-polkit-rule libexec
   libexec/retrobox-common.sh libexec/retrobox-settings-helper
 # the polkit action of retrobox-settings-helper (Debian's keyboard and language, with pkexec)
 mkdir -p "${stage}/usr/share/polkit-1/actions"
-sed -e "s|@HELPER@|/${SHARE_PATH}/libexec/retrobox-settings-helper|" \
+sed -e "s|@HELPER@|/${RETROBOX_PATH}/libexec/retrobox-settings-helper|" \
   -e "s|@MARK@|Installed by the retrobox-system-settings package|" \
   "${ROOT}/share/polkit/org.retroboxproject.system-settings.policy.in" \
   >"${stage}/usr/share/polkit-1/actions/org.retroboxproject.system-settings.policy"
@@ -110,14 +116,16 @@ build "${stage}" retrobox-session-labwc
 
 ## retrobox-session-openbox
 stage="$(new_package retrobox-session-openbox)"
-add "${stage}" bin/retrobox-openbox-session libexec/retrobox-openbox-autostart share/openbox
+add "${stage}" bin/retrobox-openbox-session libexec/retrobox-openbox-autostart \
+  libexec/mouse-hide-x11 libexec/mouse-show-x11 share/openbox
 mkdir -p "${stage}/usr/share/xsessions"
 cp "${ROOT}/share/xsessions/retrobox-openbox.desktop" "${stage}/usr/share/xsessions/"
 command_link "${stage}" retrobox-openbox-session bin/retrobox-openbox-session
 control "${stage}" retrobox-session-openbox \
-  "retrobox-system-settings (= ${VERSION}), openbox" "picom, pulseaudio-utils" \
+  "retrobox-system-settings (= ${VERSION}), openbox, unclutter-xfixes" \
+  "picom, pulseaudio-utils" \
   "Retrobox as the machine's only interface: Openbox session" \
   "An Openbox (X11) session for a display manager (retrobox-openbox), with" \
   "the picom compositor and Retrobox; a machine adds its own steps in" \
-  "/etc/retrobox-system-settings/session.d and its own rc.xml."
+  "/etc/retrobox/session.d and its own rc.xml."
 build "${stage}" retrobox-session-openbox
