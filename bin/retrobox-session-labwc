@@ -15,6 +15,10 @@
 # retrobox are started side by side inside one D-Bus session and
 # whichever ends first takes the other down with it.
 #
+# retrobox runs with --console (the console mode: EmulationStation can't be
+# quit and offers the machine's own system settings), on the same start as
+# labwc and beside it.
+#
 # When retrobox quits normally (exit status 0) the machine is powered off
 # (systemctl poweroff) if ~/.config/retrobox-session-labwc/on_quit says `poweroff`
 # (what `install.sh` writes by default; `--on-quit shell` just ends the
@@ -191,7 +195,7 @@ run_session() {
   fi
   log "labwc ready on ${WAYLAND_DISPLAY:-?} (pid ${labwc_pid}); starting ${RETROBOX_BIN}"
 
-  "${RETROBOX_BIN}" &
+  "${RETROBOX_BIN}" --console &
   app_pid=$!
 
   # Whichever of the two ends first ends the session.

@@ -557,11 +557,10 @@ write_tty_setting() {
 labwc_tty = ${TTY}
 
 [core]
-# Retrobox is the machine's only screen: EmulationStation can't be quit (its
-# QUIT menu restarts, suspends or shuts down) and its system settings set the
-# machine's time zone, keyboard and language with retrobox-system-settings.
-# console_mode = false in your own retrobox.ini turns it off.
-console_mode = true
+# Retrobox is the machine's only screen: the session scripts pass --console
+# to retrobox (EmulationStation can't be quit; QUIT offers restart, suspend
+# or shut down). Its system settings set the machine's time zone, keyboard
+# and language with retrobox-system-settings.
 system_settings = ${DATA_DIR}/bin/retrobox-system-settings
 INI
 }

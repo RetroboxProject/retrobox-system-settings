@@ -8,7 +8,8 @@
 # want). Its backend is [openbox] compositor in retrobox.ini: glx (the
 # default), xrender, egl, or none for no compositor.
 #
-# Retrobox runs in the background: if it ends, Openbox stays up.
+# Retrobox runs in the background (with --console: the console mode), if it
+# ends Openbox stays up.
 set -euo pipefail
 
 # shellcheck source=libexec/retrobox-common.sh
@@ -34,4 +35,4 @@ glx | xrender | egl)
 *) echo "[openbox] compositor: unknown '${backend}' (glx, xrender, egl or none): no compositor" ;;
 esac
 
-retrobox &
+retrobox --console &

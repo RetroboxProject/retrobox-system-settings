@@ -127,7 +127,8 @@ cmp -s "${ROOT}/libexec/retrobox-settings-helper" "${RETROBOX_SETTINGS_HELPER}" 
 grep -q "exec.path\">${RETROBOX_SETTINGS_HELPER}<" "${POLICY}" && grep -q 'id="org.retroboxproject.system-settings.set"' "${POLICY}" \
   || fail "settings helper's polkit action wrong: $(cat "${POLICY}")"
 grep -q "^system_settings = ${DATA}/bin/retrobox-system-settings\$" "${HOME}/.config/retrobox/retrobox.ini.d/50-labwc.ini" || fail "[core] system_settings not written"
-grep -qx 'console_mode = true' "${HOME}/.config/retrobox/retrobox.ini.d/50-labwc.ini" || fail "console mode not turned on"
+! grep -qx 'console_mode = true' "${HOME}/.config/retrobox/retrobox.ini.d/50-labwc.ini" \
+  || fail "console_mode still written: $(cat "${HOME}/.config/retrobox/retrobox.ini.d/50-labwc.ini")"
 [[ "$(readlink -- "${HOME}/.local/bin/retrobox-system-settings")" == "${DATA}/bin/retrobox-system-settings" ]] || fail "retrobox-system-settings not linked"
 pass "install renders the service and the config; the profile stays untouched"
 
@@ -216,7 +217,7 @@ SH
 # retrobox: first run waits (so the test can restart), later runs end by themselves
 cat >"${WORK}/core/bin/retrobox" <<SH
 #!/bin/sh
-echo "retrobox display=\$WAYLAND_DISPLAY" >>"${RUNS}"
+echo "retrobox display=\$WAYLAND_DISPLAY args=\$*" >>"${RUNS}"
 n=\$(grep -c '^retrobox' "${RUNS}")
 if [ "\$n" -ge 2 ]; then exit 0; fi
 exec sleep 30
@@ -228,6 +229,7 @@ SESSION=$!
 for _ in $(seq 1 100); do grep -q '^retrobox' "${RUNS}" && break; sleep 0.1; done
 grep -q 'labwc layout=es dir=.*/retrobox-session-labwc' "${RUNS}" || fail "labwc not started with the keyboard and config dir: $(cat "${RUNS}" "${RETROBOX_LABWC_LOG}")"
 grep -q 'retrobox display=wayland-test' "${RUNS}" || fail "retrobox did not get labwc's environment"
+grep -q 'args=--console' "${RUNS}" || fail "the session did not start retrobox with --console: $(cat "${RUNS}")"
 printf 'XKBLAYOUT="fr"\n' >"${RETROBOX_KEYBOARD_FILE}"
 "${HOME}/.local/bin/retrobox-session-labwc" --restart || fail "--restart failed"
 for _ in $(seq 1 150); do kill -0 "${SESSION}" 2>/dev/null || break; sleep 0.1; done
@@ -238,7 +240,7 @@ pgrep -u "$(id -u)" -f "sleep 30" >/dev/null && pkill -u "$(id -u)" -f "sleep 30
 pass "the session starts, restarts on request and re-reads the keyboard"
 
 # --- 8b. a stop request (systemctl stop) closes labwc and retrobox promptly --------------
-printf '#!/bin/sh\necho "retrobox display=\$WAYLAND_DISPLAY" >>"%s"\nexec sleep 30\n' "${RUNS}" >"${WORK}/core/bin/retrobox"
+printf '#!/bin/sh\necho "retrobox display=\$WAYLAND_DISPLAY args=\$*" >>"%s"\nexec sleep 30\n' "${RUNS}" >"${WORK}/core/bin/retrobox"
 chmod +x "${WORK}/core/bin/retrobox"
 : >"${RUNS}"
 "${HOME}/.local/bin/retrobox-session-labwc" -f &
@@ -527,7 +529,7 @@ openbox_session || fail "the Openbox session failed: $(cat "${HOME}/.local/state
 [[ "$(head -n 2 "${OB_LOG}")" == $'hook 10\nhook 20' ]] || fail "session.d hooks: $(cat "${OB_LOG}")"
 grep -q "^openbox --config-file ${OB}/run/retrobox-openbox-rc.xml --startup ${ROOT}/libexec/retrobox-openbox-autostart\$" "${OB_LOG}" || fail "openbox not started right: $(cat "${OB_LOG}")"
 grep -q "${ROOT}/libexec/retrobox-volume up" "${OB}/run/retrobox-openbox-rc.xml" || fail "@LIBEXEC@ not filled in"
-grep -qx 'picom -b --config /dev/null --backend glx --vsync' "${OB_LOG}" && grep -qx 'retrobox ' "${OB_LOG}" || fail "autostart: $(cat "${OB_LOG}")"
+grep -qx 'picom -b --config /dev/null --backend glx --vsync' "${OB_LOG}" && grep -qx 'retrobox --console' "${OB_LOG}" || fail "autostart: $(cat "${OB_LOG}")"
 grep -qx 'unclutter-xfixes --start-hidden --fork' "${OB_LOG}" || fail "the mouse cursor is not hidden at session start: $(cat "${OB_LOG}")"
 : >"${OB_LOG}"
 PATH="${OB}/bin:${PATH}" "${ROOT}/libexec/mouse-hide-x11" || fail "mouse-hide-x11 failed"
@@ -546,7 +548,7 @@ rm -f "${OB}/bin/unclutter-xfixes"
 openbox_session || fail "the Openbox session failed without unclutter"
 grep -q 'mouse cursor: hide failed' "${HOME}/.local/state/retrobox/logs/openbox-session.log" \
   || fail "missing unclutter is not reported: $(cat "${HOME}/.local/state/retrobox/logs/openbox-session.log")"
-grep -qx 'retrobox ' "${OB_LOG}" || fail "Retrobox did not run without unclutter"
+grep -qx 'retrobox --console' "${OB_LOG}" || fail "Retrobox did not run without unclutter"
 mkdir -p "${WORK}/bare-x11"
 for need in env bash; do
   ln -sf "$(PATH="${BASE_PATH}" command -v "${need}")" "${WORK}/bare-x11/${need}"

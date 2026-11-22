@@ -62,7 +62,7 @@ Everything lands in your home:
 
 - `~/.local/share/retrobox-session-labwc`: a copy of this tree (the checkout can go) and `retrobox-session-labwc` linked in `~/.local/bin`
 - `~/.config/retrobox-session-labwc`: labwc's config for the session (`labwc -C`); your `~/.config/labwc` is never touched
-- `~/.config/retrobox/retrobox.ini.d/50-labwc.ini`: `[advanced] labwc_tty`, and Retrobox's console mode (`[core] console_mode = true`: EmulationStation can't be quit, its *Quit* menu restarts, suspends or shuts down) with `[core] system_settings` (see [System settings](#system-settings-console-mode)); `console_mode = false` in your own `retrobox.ini` turns it off
+- `~/.config/retrobox/retrobox.ini.d/50-labwc.ini`: `[advanced] labwc_tty`, and `[core] system_settings` (see [System settings](#system-settings-console-mode)); Retrobox's console mode is enabled by the session scripts, which pass `--console` to retrobox — it is not a config key
 
 **The TTY is fixed once installed.** To change it: `~/.local/share/retrobox-session-labwc/install.sh --uninstall`, then install again. Running the installer again with the same TTY just updates.
 
@@ -80,7 +80,7 @@ then press **Win+Shift+R** (or `systemctl restart retrobox-session-labwc`).
 
 ## System settings (console mode)
 
-In Retrobox's console mode (`[core] console_mode = true`), EmulationStation is the machine's only screen, so its *System settings* offer the machine's **time zone**, **keyboard layout and variant** and **language**, as batocera's do. Retrobox doesn't set those itself: it runs `bin/retrobox-system-settings`, which `install.sh` links in `~/.local/bin` and points `[core] system_settings` at (the package also puts it in `/usr/bin`, where Retrobox finds it too):
+In console mode (`--console`, which the session scripts always pass), EmulationStation is the machine's only screen — it cannot be quit, its *Quit* menu offers restart, suspend and shut down — so its *System settings* offer the machine's **time zone**, **keyboard layout and variant** and **language**, as batocera's do. Retrobox doesn't set those itself: it runs `bin/retrobox-system-settings`, which `install.sh` links in `~/.local/bin` and points `[core] system_settings` at (the package also puts it in `/usr/bin`, where Retrobox finds it too):
 
 ```
 retrobox-system-settings timezone get | set ZONE
