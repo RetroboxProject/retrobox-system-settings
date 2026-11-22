@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Generated from rc.xml.in by retrobox-labwc - do not edit (re-run `retrobox-labwc install` instead). -->
+<!-- Generated from rc.xml.in by retrobox-session-labwc - do not edit (re-run install.sh instead). -->
 <!-- The keyboard layout is not set here: the session exports the system's (XKB_DEFAULT_*). -->
 <labwc_config>
   <keyboard>
@@ -14,7 +14,7 @@
     <!-- Restart the session (re-reads the system keyboard) -->
     <keybind key="W-S-r">
       <action name="Execute">
-        <command>@LABWC_DIR@/bin/retrobox-labwc-session --restart</command>
+        <command>@LABWC_DIR@/bin/retrobox-session-labwc --restart</command>
       </action>
     </keybind>
     <!-- Close the active window -->

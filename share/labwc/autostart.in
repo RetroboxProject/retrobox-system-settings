@@ -1,11 +1,11 @@
-# Generated from autostart.in by retrobox-labwc - do not edit (re-run `retrobox-labwc install` instead).
+# Generated from autostart.in by retrobox-session-labwc - do not edit (re-run install.sh instead).
 
 # The kernel command line's video= mode (see retrobox-switch-display), applied
 # first and synchronously so retrobox starts on the final resolution.
 @LABWC_DIR@/libexec/retrobox-switch-display mode
 
 # Report the environment labwc sets up for its children to
-# retrobox-labwc-session, which starts retrobox outside labwc's process
+# retrobox-session-labwc, which starts retrobox outside labwc's process
 # tree and needs it (DISPLAY for Ryujinx/Eden, XDG_SESSION_TYPE, ...).
 # Written atomically: the session script waits for this file to appear.
 if [ -n "${RETROBOX_LABWC_ENV_FILE:-}" ]; then

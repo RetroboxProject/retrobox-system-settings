@@ -3,20 +3,20 @@
 # (Debian netinstall, Arch, ...). It installs no packages: it CHECKS that
 # what the session needs is there and sets up the rest.
 #
-# The session runs as a systemd service (retrobox-labwc.service) that owns
+# The session runs as a systemd service (retrobox-session-labwc.service) that owns
 # the gaming TTY and logs your user in on it, so there is no autologin and
 # no login hook. You manage it like any service:
-#   systemctl stop retrobox-labwc     bare system: the TTY gets its login prompt
-#   systemctl start retrobox-labwc    the gaming session again
-#   systemctl restart retrobox-labwc  start it over (e.g. after a keyboard change)
+#   systemctl stop retrobox-session-labwc     bare system: the TTY gets its login prompt
+#   systemctl start retrobox-session-labwc    the gaming session again
+#   systemctl restart retrobox-session-labwc  start it over (e.g. after a keyboard change)
 #
 # It checks:
 #   * labwc, pipewire-pulse and a terminal (foot or alacritty) are installed
 #     (also dbus-run-session, which the session needs; the rest is advice)
 #
 # The service and a polkit rule are the only things that need root (it asks
-# for your password through sudo): /etc/systemd/system/retrobox-labwc.service,
-# enabled at boot, and /etc/polkit-1/rules.d/50-retrobox-labwc.rules, which
+# for your password through sudo): /etc/systemd/system/retrobox-session-labwc.service,
+# enabled at boot, and /etc/polkit-1/rules.d/50-retrobox-console.rules, which
 # lets your user start and stop that service, power off and reboot from any
 # session (so ssh and the systemctl reboot/poweroff sent by EmulationStation
 # need no password), and set the system's time zone and keyboard layout
@@ -24,11 +24,11 @@
 # skip just the rule.
 #
 # It sets up, in your home only:
-#   * ~/.local/share/retrobox-labwc    this tree (so the checkout can go)
-#   * ~/.config/retrobox-labwc         labwc's config for the session
+#   * ~/.local/share/retrobox-session-labwc    this tree (so the checkout can go)
+#   * ~/.config/retrobox-session-labwc         labwc's config for the session
 #   * ~/.config/retrobox/retrobox.ini.d/50-labwc.ini   the gaming TTY, and
-#     [core] system_settings: retrobox-system-settings, which sets the time
-#     zone and keyboard from EmulationStation in console mode
+#     Retrobox's console mode with retrobox-system-settings, which sets the
+#     time zone, keyboard and language from EmulationStation
 #
 # The keyboard is always the system's (/etc/default/keyboard on Debian,
 # localectl elsewhere), read every time the session starts. After changing
@@ -57,19 +57,25 @@ SELF="$(readlink -f -- "${BASH_SOURCE[0]}")"
 readonly SELF
 SELF_DIR="$(dirname -- "${SELF}")"
 readonly SELF_DIR
-# shellcheck source=libexec/retrobox-labwc-common.sh
-source "${SELF_DIR}/libexec/retrobox-labwc-common.sh"
+# shellcheck source=libexec/retrobox-common.sh
+source "${SELF_DIR}/libexec/retrobox-common.sh"
 
-readonly GENERATED_MARK="by retrobox-labwc"
+readonly GENERATED_MARK="by retrobox-session-labwc"
+# what this installer wrote, now or when it was retrobox-labwc's
+readonly OURS_RE="by retrobox-(session-)?labwc"
 readonly BLOCK_BEGIN="# >>> retrobox-labwc (managed by its install.sh; removed by --uninstall) >>>"
 readonly BLOCK_END="# <<< retrobox-labwc <<<"
-readonly DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/retrobox-labwc"
+readonly DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/retrobox-session-labwc"
+# where it all was when the session was retrobox-labwc (migrated by migrate_old_names)
+readonly OLD_DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/retrobox-labwc"
+readonly OLD_CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox-labwc"
+readonly OLD_UNIT_NAME="retrobox-labwc.service"
 readonly CONFIG_DIR="${RETROBOX_LABWC_CONFIG_DIR}"
 readonly RETROBOX_CONFIG_DIR="${RETROBOX_CONFIGDIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox}"
 readonly TTY_DROPIN="${RETROBOX_CONFIG_DIR}/retrobox.ini.d/50-labwc.ini"
 readonly MANIFEST="${DATA_DIR}/.install-manifest"
 readonly BIN_DIR="${HOME}/.local/bin"
-readonly SESSION_LINK="${BIN_DIR}/retrobox-labwc-session"
+readonly SESSION_LINK="${BIN_DIR}/retrobox-session-labwc"
 readonly SETTINGS_LINK="${BIN_DIR}/retrobox-system-settings"
 readonly POLKIT_DIR="${RETROBOX_POLKIT_DIR:-/etc/polkit-1/rules.d}"
 readonly SYSTEMD_DIR="${RETROBOX_SYSTEMD_DIR:-/etc/systemd/system}"
@@ -92,6 +98,9 @@ die() {
 usage() { sed -n '2,/^set -euo/p' "${SELF}" | sed '$d; s/^# \{0,1\}//'; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# is_ours FILE: whether this installer wrote FILE (under either name)
+is_ours() { grep -qsE "${OURS_RE}" "$1"; }
 
 # --------------------------------------------------------------- checks
 # Which package manager's names to suggest: apt, pacman, dnf or "".
@@ -230,7 +239,7 @@ print_install_hint() {
   ((${#rec[@]} == 0)) || info "Recommended: ${cmd} ${rec[*]}"
 }
 
-UNIT_NAME="retrobox-labwc.service"
+UNIT_NAME="retrobox-session-labwc.service"
 readonly UNIT_NAME
 
 unit_path() {
@@ -273,7 +282,7 @@ UtmpIdentifier=tty${tty}
 UtmpMode=user
 Environment=RETROBOX_LABWC_TTY=${tty}
 ExecStartPre=+-${chvt} ${tty}
-ExecStart=/bin/bash -lc 'exec ${DATA_DIR}/bin/retrobox-labwc-session'
+ExecStart=/bin/bash -lc 'exec ${DATA_DIR}/bin/retrobox-session-labwc'
 ExecStopPost=+-/bin/sh -c '${systemctl_bin} list-jobs --no-legend | grep -qE "${UNIT_NAME} +(start|restart)" || exec ${systemctl_bin} --no-block start getty@tty${tty}.service'
 Restart=no
 TimeoutStopSec=12
@@ -355,7 +364,7 @@ remove_old_dropin() {
     return 0
   fi
   info "Removing the autologin drop-in of the previous install (sudo): ${dropin}"
-  grep -qsF "${GENERATED_MARK}" "${dropin}" && sudo rm -f -- "${dropin}"
+  is_ours "${dropin}" && sudo rm -f -- "${dropin}"
   sudo rmdir --ignore-fail-on-non-empty -- "$(dirname -- "${dropin}")" 2>/dev/null || true
   [[ -z "${enabled}" ]] || sudo systemctl disable "getty@tty${tty}.service" >/dev/null 2>&1 || true
   sudo systemctl daemon-reload
@@ -376,7 +385,7 @@ merge_notes() {
 }
 
 polkit_rule_path() {
-  printf '%s/50-retrobox-labwc.rules\n' "${POLKIT_DIR}"
+  printf '%s/50-retrobox-console.rules\n' "${POLKIT_DIR}"
 }
 
 polkit_rule_content() {
@@ -440,7 +449,7 @@ render() {
 # Moves aside a file we are about to replace unless we generated it.
 backup_foreign() {
   local file="$1" backup
-  if [[ -f "${file}" && ! -L "${file}" ]] && ! grep -qF "${GENERATED_MARK}" "${file}"; then
+  if [[ -f "${file}" && ! -L "${file}" ]] && ! is_ours "${file}"; then
     backup="${file}.bak-$(date +%Y%m%d%H%M%S)"
     mv -- "${file}" "${backup}"
     warn "Kept your own $(basename -- "${file}") as ${backup}"
@@ -500,8 +509,19 @@ write_on_quit() {
 write_tty_setting() {
   info "Gaming TTY: ${TTY} (${TTY_DROPIN})"
   mkdir -p -- "$(dirname -- "${TTY_DROPIN}")"
-  printf '# Written %s.\n[advanced]\nlabwc_tty = %s\n\n[core]\n# console mode: EmulationStation sets the time zone and keyboard with it\nsystem_settings = %s\n' \
-    "${GENERATED_MARK}" "${TTY}" "${DATA_DIR}/bin/retrobox-system-settings" >"${TTY_DROPIN}"
+  cat >"${TTY_DROPIN}" <<INI
+# Written ${GENERATED_MARK}.
+[advanced]
+labwc_tty = ${TTY}
+
+[core]
+# Retrobox is the machine's only screen: EmulationStation can't be quit (its
+# QUIT menu restarts, suspends or shuts down) and its system settings set the
+# machine's time zone, keyboard and language with retrobox-system-settings.
+# console_mode = false in your own retrobox.ini turns it off.
+console_mode = true
+system_settings = ${DATA_DIR}/bin/retrobox-system-settings
+INI
 }
 
 # Deletes our block from a profile (if it is there). Written back with cat so
@@ -543,8 +563,48 @@ remove_legacy() {
   fi
 }
 
+# The session used to be retrobox-labwc: its copy, config, service, rule and
+# link move to the new names. The copy (with its manifest: the TTY, an old
+# autologin drop-in to remove) and the config (the on-quit choice) are moved;
+# the old service is disabled and its unit and polkit rule removed, as the new
+# ones replace them. A session still running goes on until the next boot.
+migrate_old_names() {
+  local old_manifest="${OLD_DATA_DIR}/.install-manifest" unit rule
+  [[ -f "${old_manifest}" && ! -f "${MANIFEST}" ]] || return 0
+  info "Moving the retrobox-labwc install to its new names (retrobox-session-labwc)..."
+  unit="$(sed -n 's/^system_unit=//p' "${old_manifest}" | head -n1)"
+  rule="$(sed -n 's/^polkit_rule=//p' "${old_manifest}" | head -n1)"
+  if [[ -n "${unit}${rule}" ]]; then
+    if ((SYSTEM == 1)) && have sudo; then
+      info "Removing the old service and polkit rule (sudo): ${unit} ${rule}"
+      if [[ -n "${unit}" ]]; then
+        sudo systemctl disable "${OLD_UNIT_NAME}" >/dev/null 2>&1 || true
+        is_ours "${unit}" && sudo rm -f -- "${unit}"
+        sudo systemctl daemon-reload
+      fi
+      [[ -z "${rule}" ]] || ! is_ours "${rule}" || sudo rm -f -- "${rule}"
+    else
+      warn "Left in the system (remove as root, and disable ${OLD_UNIT_NAME}): ${unit} ${rule}"
+    fi
+  fi
+  mkdir -p -- "$(dirname -- "${DATA_DIR}")"
+  mv -- "${OLD_DATA_DIR}" "${DATA_DIR}"
+  sed -i '/^system_unit=/d; /^polkit_rule=/d' "${MANIFEST}"
+  if [[ -d "${OLD_CONFIG_DIR}" && ! -e "${CONFIG_DIR}" ]]; then
+    mv -- "${OLD_CONFIG_DIR}" "${CONFIG_DIR}"
+  fi
+  if [[ -L "${BIN_DIR}/retrobox-labwc-session" ]]; then
+    rm -f -- "${BIN_DIR}/retrobox-labwc-session"
+  fi
+  if systemctl is-active --quiet "${OLD_UNIT_NAME}" 2>/dev/null; then
+    warn "The old session (${OLD_UNIT_NAME}) is still running: reboot to start the new one."
+  fi
+}
+
 do_install() {
   local prev
+
+  migrate_old_names
 
   # what an earlier run did to the system, kept when this one has nothing to add
   PREV_NOTES="$(grep -E '^(system_unit|polkit_rule|system_dropin|getty_enabled)=' "${MANIFEST}" 2>/dev/null || true)"
@@ -593,9 +653,9 @@ do_install() {
   remove_legacy
 
   mkdir -p -- "${BIN_DIR}"
-  ln -sfn -- "${DATA_DIR}/bin/retrobox-labwc-session" "${SESSION_LINK}"
+  ln -sfn -- "${DATA_DIR}/bin/retrobox-session-labwc" "${SESSION_LINK}"
   ln -sfn -- "${DATA_DIR}/bin/retrobox-system-settings" "${SETTINGS_LINK}"
-  [[ ":${PATH}:" == *":${BIN_DIR}:"* ]] || warn "${BIN_DIR} is not in your PATH (retrobox-labwc-session is linked there)."
+  [[ ":${PATH}:" == *":${BIN_DIR}:"* ]] || warn "${BIN_DIR} is not in your PATH (retrobox-session-labwc is linked there)."
 
   merge_notes
   printf 'tty=%s\nuser=%s\ndate=%s\n%s' "${TTY}" "${USER_NAME}" "$(date -Iseconds)" "${SYSTEM_NOTES}" >"${MANIFEST}"
@@ -623,12 +683,12 @@ uninstall_system() {
   fi
   if [[ -n "${rule}" ]]; then
     info "Removing ${rule} (sudo)..."
-    grep -qsF "${GENERATED_MARK}" "${rule}" && sudo rm -f -- "${rule}"
+    is_ours "${rule}" && sudo rm -f -- "${rule}"
   fi
   if [[ -n "${unit}" ]]; then
     info "Removing ${unit} (sudo)..."
     sudo systemctl disable "${UNIT_NAME}" >/dev/null 2>&1 || true
-    grep -qsF "${GENERATED_MARK}" "${unit}" && sudo rm -f -- "${unit}"
+    is_ours "${unit}" && sudo rm -f -- "${unit}"
     sudo systemctl daemon-reload
   fi
   remove_old_dropin
@@ -654,7 +714,7 @@ do_uninstall() {
     rm -rf -- "${CONFIG_DIR}"
     found=1
   fi
-  if grep -qsF "${GENERATED_MARK}" "${TTY_DROPIN}"; then
+  if is_ours "${TTY_DROPIN}"; then
     info "Removing ${TTY_DROPIN}..."
     rm -f -- "${TTY_DROPIN}"
     rmdir --ignore-fail-on-non-empty -- "$(dirname -- "${TTY_DROPIN}")" 2>/dev/null || true

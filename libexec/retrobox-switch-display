@@ -29,8 +29,8 @@ SELF="$(readlink -f -- "${BASH_SOURCE[0]}")"
 readonly SELF
 SCRIPT_DIR="$(dirname -- "${SELF}")"
 readonly SCRIPT_DIR
-# shellcheck source=libexec/retrobox-labwc-common.sh
-source "${SCRIPT_DIR}/retrobox-labwc-common.sh"
+# shellcheck source=libexec/retrobox-common.sh
+source "${SCRIPT_DIR}/retrobox-common.sh"
 
 if (($# > 1)) || [[ -n "${1:-}" && "$1" != "toggle" && "$1" != "mode" ]]; then
   echo "usage: $(basename "$0") [toggle|mode]" >&2

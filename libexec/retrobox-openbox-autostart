@@ -11,8 +11,8 @@
 # Retrobox runs in the background: if it ends, Openbox stays up.
 set -euo pipefail
 
-# shellcheck source=libexec/retrobox-labwc-common.sh
-source "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/retrobox-labwc-common.sh"
+# shellcheck source=libexec/retrobox-common.sh
+source "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/retrobox-common.sh"
 
 backend="$(get_retrobox_setting openbox compositor || true)"
 backend="${backend:-glx}"

@@ -2,7 +2,7 @@
 # Prints the polkit rule that lets the console's user, with no password:
 #   * power off and reboot from any session (EmulationStation sends
 #     systemctl poweroff and reboot; ssh too),
-#   * set the system's time zone and keyboard layout (retrobox-system-settings,
+#   * set the system's time zone, keyboard layout and language (retrobox-system-settings,
 #     from EmulationStation's system settings in console mode),
 #   * with --unit, start, stop and restart that systemd unit (the labwc
 #     session's service).
@@ -33,13 +33,13 @@ if [[ -n "${unit}" ]]; then
 // Written ${mark}: ${user} may power off and reboot from any
 // session (EmulationStation sends systemctl poweroff and reboot), start,
 // stop and restart ${unit} (ssh included), and set the system's time
-// zone and keyboard layout (retrobox-system-settings, from EmulationStation).
+// zone, keyboard layout and language (retrobox-system-settings, from EmulationStation).
 RULE
 else
   cat <<RULE
 // Written ${mark}: ${user} may power off and reboot from any
 // session (EmulationStation sends systemctl poweroff and reboot), and set
-// the system's time zone and keyboard layout (retrobox-system-settings,
+// the system's time zone, keyboard layout and language (retrobox-system-settings,
 // from EmulationStation).
 RULE
 fi
@@ -63,7 +63,8 @@ RULE
 fi
 cat <<'RULE'
   if (action.id == "org.freedesktop.timedate1.set-timezone" ||
-      action.id == "org.freedesktop.locale1.set-keyboard") {
+      action.id == "org.freedesktop.locale1.set-keyboard" ||
+      action.id == "org.freedesktop.locale1.set-locale") {
     return polkit.Result.YES;
   }
   return polkit.Result.NOT_HANDLED;

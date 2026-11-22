@@ -5,7 +5,7 @@
 # No path is hardcoded:
 #   * RETROBOX_LABWC_DIR is this tree's own root, derived from this file's
 #     real location (<dir>/libexec/ -> <dir>): the git checkout, or the copy
-#     `retrobox-labwc install` made in ~/.local/share/retrobox-labwc.
+#     install.sh made in ~/.local/share/retrobox-session-labwc.
 #   * RETROBOX_ROOT is the retrobox-core install, found (in this order) from
 #     $RETROBOX_ROOT and the `retrobox` command on PATH. It may stay empty:
 #     only what really needs retrobox-core (starting it) fails without it.
@@ -30,7 +30,7 @@ RETROBOX_LABWC_DIR="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")
 
 # labwc's own configuration directory for the gaming session (labwc -C):
 # kept apart from ~/.config/labwc so it never touches a labwc setup of yours.
-RETROBOX_LABWC_CONFIG_DIR="${RETROBOX_LABWC_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox-labwc}"
+RETROBOX_LABWC_CONFIG_DIR="${RETROBOX_LABWC_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox-session-labwc}"
 
 # Where the system keyboard is configured (keyboard-configuration on Debian).
 RETROBOX_KEYBOARD_FILE="${RETROBOX_KEYBOARD_FILE:-/etc/default/keyboard}"

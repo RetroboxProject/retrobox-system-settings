@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# retrobox-system-settings: the machine's time zone and keyboard layout, for
-# EmulationStation's system settings in Retrobox's console mode.
+# retrobox-system-settings: the machine's time zone, keyboard layout and
+# language, for EmulationStation's system settings in Retrobox's console mode.
 #
 #   retrobox-system-settings timezone get | set ZONE
 #   retrobox-system-settings keyboard get | list-layouts | list-variants LAYOUT | set LAYOUT [VARIANT]
+#   retrobox-system-settings locale get | list | set LANGUAGE
 #
 # This is the program retrobox-core's README asks for ("Console mode and the
 # system's settings"): install.sh points [core] system_settings at it, and
@@ -11,22 +12,28 @@
 #
 # They are the system's own settings, set with systemd (timedatectl,
 # localectl): they end up where the distribution keeps them (/etc/localtime;
-# /etc/default/keyboard on Debian, which also sets the text console) and are
-# read back from there. No password is asked: install.sh's polkit rule lets the
-# session's user do these two things. A new time zone applies at once; a new
-# keyboard layout when the session starts again (it reads the system's
-# keyboard then).
+# /etc/default/keyboard on Debian, which also sets the text console;
+# /etc/default/locale or /etc/locale.conf) and are read back from there. No
+# password is asked: the polkit rule (retrobox-polkit-rule) lets the session's
+# user do these three things. A new time zone applies at once; a new keyboard
+# layout or language when the session starts again (it reads them then).
+#
+# A language is a locale's language and territory (es_ES), from the locales
+# the system has (localectl list-locales: on Debian, the ones generated from
+# /etc/locale.gen); only UTF-8 ones are offered, and set as LANG.
 #
 # get prints the value (keyboard: "<layout> <variant>", "none" for no
-# variant); the lists print "<code> <description>" lines (XKB's, from
-# /usr/share/X11/xkb/rules/evdev.lst); a failure exits with 1 and its last line
-# is "Error: <why>", which EmulationStation shows.
+# variant; locale: the language, en_US when none is set); the lists print
+# "<code> <description>" lines (XKB's, from /usr/share/X11/xkb/rules/evdev.lst;
+# for the locales, the code and the locale's name); a failure exits with 1 and
+# its last line is "Error: <why>", which EmulationStation shows.
 set -euo pipefail
 
 ZONEINFO="${RETROBOX_ZONEINFO:-/usr/share/zoneinfo}"
 XKB_RULES="${RETROBOX_XKB_RULES:-/usr/share/X11/xkb/rules/evdev.lst}"
 KEYBOARD_FILE="${RETROBOX_KEYBOARD_FILE:-/etc/default/keyboard}"
 LOCALTIME="${RETROBOX_LOCALTIME:-/etc/localtime}"
+LOCALE_FILES="${RETROBOX_LOCALE_FILES:-/etc/default/locale /etc/locale.conf}"
 
 fail() {
   echo "Error: $*"
@@ -149,6 +156,48 @@ keyboard_set() {
     "${layout}" "${current[2]:-}" "${variant}" "${current[3]:-}"
 }
 
+## Language -------------------------------------------------------------------
+
+# The system's UTF-8 locales, one "<language> <locale>" line each (es_ES es_ES.UTF-8).
+locale_available() {
+  local names
+  if have localectl && names="$(localectl list-locales 2>/dev/null)" && [[ -n "${names}" ]]; then
+    :
+  elif have locale; then
+    names="$(locale -a 2>/dev/null)"
+  fi
+  printf '%s\n' "${names:-}" | awk '
+    tolower($0) ~ /\.utf-?8$/ {
+      code = $0; sub(/\..*/, "", code)
+      if (code ~ /^[a-z][a-z][a-z]?_[A-Z][A-Z]$/ && !(code in seen)) { seen[code] = 1; print code " " $0 }
+    }'
+}
+
+locale_get() {
+  local lang="" file
+  if have localectl; then
+    lang="$(localectl status 2>/dev/null | sed -n 's/^[[:space:]]*System Locale:.*LANG=\([^[:space:]]*\).*/\1/p' | head -n 1)"
+  fi
+  if [[ -z "${lang}" ]]; then
+    for file in ${LOCALE_FILES}; do
+      [[ -r "${file}" ]] || continue
+      lang="$(sed -n "s/^[[:space:]]*LANG=[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\}.*/\1/p" "${file}" | tail -n 1)"
+      [[ -n "${lang}" ]] && break
+    done
+  fi
+  lang="${lang%%[.@]*}"
+  [[ "${lang}" =~ ^[a-z][a-z][a-z]?_[A-Z][A-Z]$ ]] || lang="en_US"
+  printf '%s\n' "${lang}"
+}
+
+locale_set() {
+  local code="$1" name
+  [[ "${code}" =~ ^[a-z][a-z][a-z]?_[A-Z][A-Z]$ ]] || fail "unknown language '${code}'"
+  name="$(locale_available | awk -v code="${code}" '$1 == code { print $2; exit }')"
+  [[ -n "${name}" ]] || fail "the system has no locale for '${code}' (Debian: add ${code}.UTF-8 to /etc/locale.gen and run locale-gen)"
+  change "the language" localectl --no-ask-password set-locale "LANG=${name}"
+}
+
 ## Command line ---------------------------------------------------------------
 
 case "${1:-} ${2:-}" in
@@ -158,6 +207,9 @@ case "${1:-} ${2:-}" in
 "keyboard list-layouts") keyboard_layouts ;;
 "keyboard list-variants") [[ $# -eq 3 ]] || usage 2; keyboard_variants "$3" ;;
 "keyboard set") [[ $# -eq 3 || $# -eq 4 ]] || usage 2; keyboard_set "$3" "${4:-}" ;;
+"locale get") locale_get ;;
+"locale list") locale_available ;;
+"locale set") [[ $# -eq 3 ]] || usage 2; locale_set "$3" ;;
 "-h "* | "--help "*) usage 0 ;;
 *) usage 2 >&2 ;;
 esac

@@ -2,11 +2,11 @@
 # Runs the labwc gaming session on the gaming TTY: labwc and retrobox side
 # by side, closed together when either of them ends.
 #
-# It is started by retrobox-labwc.service (see install.sh), which logs the
+# It is started by retrobox-session-labwc.service (see install.sh), which logs the
 # user in on the gaming TTY through PAM and runs it in the foreground,
 # attached to that VT — that is what gives labwc a seat. When the session
 # ends the service ends and the TTY gets its login prompt back; the same
-# happens on `systemctl stop retrobox-labwc`, from ssh or anywhere.
+# happens on `systemctl stop retrobox-session-labwc`, from ssh or anywhere.
 #
 # labwc's "-s" is deliberately not used: labwc only ties its lifetime to
 # the startup command when that command is itself the primary Wayland
@@ -16,7 +16,7 @@
 # whichever ends first takes the other down with it.
 #
 # When retrobox quits normally (exit status 0) the machine is powered off
-# (systemctl poweroff) if ~/.config/retrobox-labwc/on_quit says `poweroff`
+# (systemctl poweroff) if ~/.config/retrobox-session-labwc/on_quit says `poweroff`
 # (what `install.sh` writes by default; `--on-quit shell` just ends the
 # service instead). A crash, Win+Shift+E or a restart never power off.
 #
@@ -29,7 +29,7 @@
 # not exist, or RETROBOX_LABWC_PRIVATE_BUS is set, it starts a private one
 # with dbus-run-session instead.
 #
-# Usage: retrobox-labwc-session [-f]
+# Usage: retrobox-session-labwc [-f]
 #   -f          Skip the "am I on the gaming TTY?" check.
 #   --restart   Restart the running session (Win+Shift+R): it starts over
 #               with the system keyboard as it is now.
@@ -51,8 +51,8 @@ if [[ "$(awk '/^CapAmb:/ {print $2}' /proc/self/status 2>/dev/null)" =~ [1-9a-f]
   command -v setpriv >/dev/null 2>&1; then
   exec setpriv --inh-caps=-all --ambient-caps=-all -- "${SELF}" "$@"
 fi
-# shellcheck source=libexec/retrobox-labwc-common.sh
-source "${SCRIPT_DIR}/../libexec/retrobox-labwc-common.sh"
+# shellcheck source=libexec/retrobox-common.sh
+source "${SCRIPT_DIR}/../libexec/retrobox-common.sh"
 
 # Next to retrobox-core's own logs.
 readonly LOG_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/retrobox/logs"
@@ -66,11 +66,11 @@ RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 readonly RUNTIME_DIR
 # labwc's autostart writes the environment labwc sets up for its own
 # children (DISPLAY, WAYLAND_DISPLAY, XDG_SESSION_TYPE, ...) here.
-readonly ENV_FILE="${RETROBOX_LABWC_ENV_FILE:-${RUNTIME_DIR}/retrobox-labwc.env}"
+readonly ENV_FILE="${RETROBOX_LABWC_ENV_FILE:-${RUNTIME_DIR}/retrobox-session-labwc.env}"
 # Its presence when labwc ends means "start over" instead of "stop".
-readonly RESTART_FLAG="${RUNTIME_DIR}/retrobox-labwc.restart"
+readonly RESTART_FLAG="${RUNTIME_DIR}/retrobox-session-labwc.restart"
 # Set when retrobox itself ended with status 0 (a normal quit).
-readonly QUIT_FLAG="${RUNTIME_DIR}/retrobox-labwc.quit"
+readonly QUIT_FLAG="${RUNTIME_DIR}/retrobox-session-labwc.quit"
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"${LOG_FILE}"
@@ -179,7 +179,7 @@ run_session() {
   done
 
   if [[ ! -s "${ENV_FILE}" ]]; then
-    log "timed out waiting for ${ENV_FILE}; is ${RETROBOX_LABWC_CONFIG_DIR}/autostart up to date? (run retrobox-labwc install)"
+    log "timed out waiting for ${ENV_FILE}; is ${RETROBOX_LABWC_CONFIG_DIR}/autostart up to date? (run install.sh again)"
     stop_pid "${labwc_pid}" "labwc"
     return 1
   fi
@@ -262,14 +262,14 @@ need=(labwc)
 [[ -S "${RUNTIME_DIR}/bus" && -z "${RETROBOX_LABWC_PRIVATE_BUS:-}" ]] || need+=(dbus-run-session)
 for cmd in "${need[@]}"; do
   if ! command -v "${cmd}" >/dev/null 2>&1; then
-    echo "error: ${cmd} not found (see: retrobox-labwc check)" >&2
+    echo "error: ${cmd} not found (see: install.sh --check)" >&2
     exit 1
   fi
 done
 
 if [[ -z "${XDG_RUNTIME_DIR:-}" || ! -d "${XDG_RUNTIME_DIR}" ]]; then
   echo "error: no XDG_RUNTIME_DIR: labwc needs a logind session" \
-    "(on Debian: install libpam-systemd; start it through retrobox-labwc.service)" >&2
+    "(on Debian: install libpam-systemd; start it through retrobox-session-labwc.service)" >&2
   exit 1
 fi
 

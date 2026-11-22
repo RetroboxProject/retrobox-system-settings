@@ -75,7 +75,7 @@ build() {
 ## retrobox-system-settings
 stage="$(new_package retrobox-system-settings)"
 add "${stage}" bin/retrobox-system-settings libexec/retrobox-polkit-rule libexec/retrobox-volume \
-  libexec/retrobox-labwc-common.sh
+  libexec/retrobox-common.sh
 cp "${ROOT}/README.md" "${stage}/usr/share/doc/retrobox-system-settings/"
 command_link "${stage}" retrobox-system-settings bin/retrobox-system-settings
 command_link "${stage}" retrobox-polkit-rule libexec/retrobox-polkit-rule
@@ -90,7 +90,7 @@ build "${stage}" retrobox-system-settings
 
 ## retrobox-session-labwc
 stage="$(new_package retrobox-session-labwc)"
-add "${stage}" install.sh bin/retrobox-labwc-session libexec/mouse-hide libexec/mouse-show \
+add "${stage}" install.sh bin/retrobox-session-labwc libexec/mouse-hide libexec/mouse-show \
   libexec/retrobox-audio-jack libexec/retrobox-switch-display share/labwc
 command_link "${stage}" retrobox-session-install install.sh
 control "${stage}" retrobox-session-labwc \
