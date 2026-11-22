@@ -75,12 +75,18 @@ build() {
 ## retrobox-system-settings
 stage="$(new_package retrobox-system-settings)"
 add "${stage}" bin/retrobox-system-settings libexec/retrobox-polkit-rule libexec/retrobox-volume \
-  libexec/retrobox-common.sh
+  libexec/retrobox-common.sh libexec/retrobox-set-keyboard
+# the polkit action of retrobox-set-keyboard (Debian's keyboard, with pkexec)
+mkdir -p "${stage}/usr/share/polkit-1/actions"
+sed -e "s|@HELPER@|/${SHARE_PATH}/libexec/retrobox-set-keyboard|" \
+  -e "s|@MARK@|Installed by the retrobox-system-settings package|" \
+  "${ROOT}/share/polkit/org.retroboxproject.system-settings.policy.in" \
+  >"${stage}/usr/share/polkit-1/actions/org.retroboxproject.system-settings.policy"
 cp "${ROOT}/README.md" "${stage}/usr/share/doc/retrobox-system-settings/"
 command_link "${stage}" retrobox-system-settings bin/retrobox-system-settings
 command_link "${stage}" retrobox-polkit-rule libexec/retrobox-polkit-rule
 control "${stage}" retrobox-system-settings "bash, systemd" \
-  "retrobox-core, polkitd, xkb-data, tzdata, wireplumber | pulseaudio-utils" \
+  "retrobox-core, polkitd, pkexec, xkb-data, tzdata, wireplumber | pulseaudio-utils" \
   "Retrobox as the machine's only interface: common part" \
   "What every Retrobox console needs, whichever its session:" \
   "retrobox-system-settings, which sets the system's time zone and keyboard" \

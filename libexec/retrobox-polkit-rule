@@ -3,7 +3,9 @@
 #   * power off and reboot from any session (EmulationStation sends
 #     systemctl poweroff and reboot; ssh too),
 #   * set the system's time zone, keyboard layout and language (retrobox-system-settings,
-#     from EmulationStation's system settings in console mode),
+#     from EmulationStation's system settings in console mode; on Debian the
+#     keyboard through retrobox-set-keyboard, the polkit action
+#     org.retroboxproject.system-settings.set-keyboard),
 #   * with --unit, start, stop and restart that systemd unit (the labwc
 #     session's service).
 # install.sh writes it for the labwc session; a system set up otherwise (a
@@ -64,7 +66,8 @@ fi
 cat <<'RULE'
   if (action.id == "org.freedesktop.timedate1.set-timezone" ||
       action.id == "org.freedesktop.locale1.set-keyboard" ||
-      action.id == "org.freedesktop.locale1.set-locale") {
+      action.id == "org.freedesktop.locale1.set-locale" ||
+      action.id == "org.retroboxproject.system-settings.set-keyboard") {
     return polkit.Result.YES;
   }
   return polkit.Result.NOT_HANDLED;

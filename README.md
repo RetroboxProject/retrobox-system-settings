@@ -88,7 +88,7 @@ retrobox-system-settings keyboard get | list-layouts | list-variants LAYOUT | se
 retrobox-system-settings locale get | list | set LANGUAGE
 ```
 
-They are the system's own settings, set with systemd's `timedatectl` and `localectl`, so they end up where the distribution keeps them (`/etc/localtime`; `/etc/default/keyboard` on Debian, which the session reads, and which also sets the text console; `/etc/default/locale` or `/etc/locale.conf`) and are read back from there. The layouts and variants are XKB's (`/usr/share/X11/xkb/rules/evdev.lst`); a new layout keeps the model and options the system had. A language is a locale's language and territory (`es_ES`), set as `LANG`; only the system's UTF-8 locales are offered (`localectl list-locales`), so on Debian a language must be generated first (add `es_ES.UTF-8 UTF-8` to `/etc/locale.gen` and run `sudo locale-gen`, or `sudo dpkg-reconfigure locales`). EmulationStation offers the ones it has a translation for and follows the system's language. A new time zone applies at once; a new keyboard layout or language when the session starts again, which EmulationStation offers. No password is asked: the polkit rule below lets your user do these three things. When it can't (no systemd, no rule), EmulationStation shows why.
+They are the system's own settings, set with systemd's `timedatectl` and `localectl`, so they end up where the distribution keeps them (`/etc/localtime`; `/etc/default/keyboard` on Debian, which the session reads, and which also sets the text console; `/etc/default/locale` or `/etc/locale.conf`) and are read back from there. The layouts and variants are XKB's (`/usr/share/X11/xkb/rules/evdev.lst`); a new layout keeps the model and options the system had. Debian doesn't let `localed` set the keyboard (its D-Bus policy rejects `SetX11Keyboard`), so where there is a `/etc/default/keyboard` the program runs `libexec/retrobox-set-keyboard` as root with `pkexec` instead: it only changes `XKBLAYOUT` and `XKBVARIANT` there, to a layout and variant XKB lists. It has its own polkit action, `org.retroboxproject.system-settings.set-keyboard`, which names a root-owned copy of it: the package's, or the one `install.sh` puts in `/usr/local/libexec/retrobox-system-settings/` (with the action in `/usr/share/polkit-1/actions/`; `--uninstall` removes both). It needs `pkexec` (`apt install pkexec`). A language is a locale's language and territory (`es_ES`), set as `LANG`; only the system's UTF-8 locales are offered (`localectl list-locales`), so on Debian a language must be generated first (add `es_ES.UTF-8 UTF-8` to `/etc/locale.gen` and run `sudo locale-gen`, or `sudo dpkg-reconfigure locales`). EmulationStation offers the ones it has a translation for and follows the system's language. A new time zone applies at once; a new keyboard layout or language when the session starts again, which EmulationStation offers. No password is asked: the polkit rule below lets your user do these three things. When it can't (no systemd, no rule), EmulationStation shows why.
 
 ## Openbox session
 
@@ -98,7 +98,7 @@ For a machine whose display manager logs the console's user in (no TTY service, 
 2. starts Openbox with the first of `~/.config/retrobox-openbox/rc.xml`, `/etc/retrobox-system-settings/openbox/rc.xml` and this tree's `share/openbox/rc.xml`, which only takes the volume keys (`retrobox-volume`) and the power key (left to logind) so that EmulationStation never sees them.
 3. once Openbox is up, starts the picom compositor (vsync, the overlay's translucency; no config file, so no shadows nor fades) and Retrobox. picom's backend is `[openbox] compositor` in `retrobox.ini`: `glx` (the default), `xrender`, `egl`, or `none` for no compositor. If Retrobox ends, Openbox stays up.
 
-Its log is `~/.local/state/retrobox/logs/openbox-session.log`. With no `install.sh`, nothing writes the polkit rule: the machine writes it, with `retrobox-polkit-rule USER > /etc/polkit-1/rules.d/50-retrobox-console.rules` (power off, reboot, time zone, keyboard and language for that user). Retrobox finds `retrobox-system-settings` in `/usr/bin`.
+Its log is `~/.local/state/retrobox/logs/openbox-session.log`. With no `install.sh`, nothing writes the polkit rule: the machine writes it, with `retrobox-polkit-rule USER > /etc/polkit-1/rules.d/50-retrobox-console.rules` (power off, reboot, time zone, keyboard, language and the keyboard helper for that user). Retrobox finds `retrobox-system-settings` in `/usr/bin`.
 
 ## Mouse pointer
 
@@ -134,7 +134,7 @@ external_output = HDMI-A-1      ; default: the first other output
 
 When Retrobox quits normally (exit status 0) the machine powers off; a crash, Win+Shift+E or a restart never do. That is the default of `./install.sh`; `--on-quit shell` just ends the service instead, so the TTY shows its login prompt (the choice lives in `~/.config/retrobox-session-labwc/on_quit`, and a re-run keeps it unless you give the option again).
 
-`systemctl poweroff` and `reboot` (also the ones EmulationStation sends) need polkit to allow them. The installer writes `/etc/polkit-1/rules.d/50-retrobox-console.rules`, which lets your user power off and reboot from any session, start, stop and restart `retrobox-session-labwc.service`, and set the system's time zone, keyboard layout and language ([System settings](#system-settings-console-mode)) without a password (`--no-polkit` skips it, and then those need `sudo`; `--uninstall` removes it; it needs `polkitd` installed). If a reboot is already in progress when Retrobox exits, the power off does not replace it.
+`systemctl poweroff` and `reboot` (also the ones EmulationStation sends) need polkit to allow them. The installer writes `/etc/polkit-1/rules.d/50-retrobox-console.rules`, which lets your user power off and reboot from any session, start, stop and restart `retrobox-session-labwc.service`, and set the system's time zone, keyboard layout (on Debian, through `retrobox-set-keyboard`) and language ([System settings](#system-settings-console-mode)) without a password (`--no-polkit` skips it, and then those need `sudo`; `--uninstall` removes it; it needs `polkitd` installed). If a reboot is already in progress when Retrobox exits, the power off does not replace it.
 
 **D-Bus.** The session uses your user bus (`$XDG_RUNTIME_DIR/bus`, run by systemd's user manager), so portals, pipewire and wireplumber are one set shared with everything else you run, and the compositor's environment (`WAYLAND_DISPLAY`, ...) is handed to that bus while the session lasts. Without a user bus (no `dbus-user-session` on Debian) it falls back to a private one with `dbus-run-session`; `RETROBOX_LABWC_PRIVATE_BUS=1` forces that fallback.
 
@@ -146,8 +146,9 @@ The session log is `~/.local/state/retrobox/logs/labwc-session.log`; the service
 install.sh    the installer: --check, install, --uninstall
 bin/          retrobox-session-labwc, retrobox-openbox-session, retrobox-system-settings
 libexec/      display switcher, mouse-hide, mouse-show, retrobox-common.sh (settings, keyboard),
-              retrobox-openbox-autostart, retrobox-polkit-rule, retrobox-volume
-share/        labwc config templates, Openbox's rc.xml, the xsession entry
+              retrobox-openbox-autostart, retrobox-polkit-rule, retrobox-set-keyboard,
+              retrobox-volume
+share/        labwc config templates, Openbox's rc.xml, the xsession entry, the polkit action
 tests/        smoke-test.sh (stand-in commands, throwaway HOME)
 packaging/    build-deb.sh (the three packages; .github/workflows/build.yml publishes them)
 ```

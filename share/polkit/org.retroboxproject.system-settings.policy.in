@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- @MARK@ -->
+<policyconfig>
+  <vendor>RetroboxProject</vendor>
+  <vendor_url>https://github.com/RetroboxProject/retrobox-system-settings</vendor_url>
+
+  <!-- retrobox-set-keyboard, run with pkexec by retrobox-system-settings where
+       the keyboard is /etc/default/keyboard (Debian). An administrator's, by
+       default; the console's polkit rule gives it to the console's user. -->
+  <action id="org.retroboxproject.system-settings.set-keyboard">
+    <description>Set the system's keyboard layout</description>
+    <message>Authentication is required to set the system's keyboard layout.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">@HELPER@</annotate>
+  </action>
+</policyconfig>

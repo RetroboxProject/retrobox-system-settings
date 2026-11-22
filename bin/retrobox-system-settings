@@ -15,8 +15,11 @@
 # /etc/default/keyboard on Debian, which also sets the text console;
 # /etc/default/locale or /etc/locale.conf) and are read back from there. No
 # password is asked: the polkit rule (retrobox-polkit-rule) lets the session's
-# user do these three things. A new time zone applies at once; a new keyboard
-# layout or language when the session starts again (it reads them then).
+# user do these three things. Debian doesn't let localed set the keyboard: there
+# it is /etc/default/keyboard, which retrobox-set-keyboard writes, run as root
+# with pkexec (its own polkit action, in the same rule). A new time zone
+# applies at once; a new keyboard layout or language when the session starts
+# again (it reads them then).
 #
 # A language is a locale's language and territory (es_ES), from the locales
 # the system has (localectl list-locales: on Debian, the ones generated from
@@ -32,6 +35,8 @@ set -euo pipefail
 ZONEINFO="${RETROBOX_ZONEINFO:-/usr/share/zoneinfo}"
 XKB_RULES="${RETROBOX_XKB_RULES:-/usr/share/X11/xkb/rules/evdev.lst}"
 KEYBOARD_FILE="${RETROBOX_KEYBOARD_FILE:-/etc/default/keyboard}"
+# where the package and install.sh put retrobox-set-keyboard (root's, for pkexec)
+KEYBOARD_HELPERS="${RETROBOX_KEYBOARD_HELPERS:-/usr/share/retrobox-system-settings/libexec/retrobox-set-keyboard /usr/local/libexec/retrobox-system-settings/retrobox-set-keyboard}"
 LOCALTIME="${RETROBOX_LOCALTIME:-/etc/localtime}"
 LOCALE_FILES="${RETROBOX_LOCALE_FILES:-/etc/default/locale /etc/locale.conf}"
 
@@ -51,7 +56,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 change() {
   local what="$1" out
   shift
-  have "$1" || fail "cannot change ${what}: $1 is not installed (it needs systemd)"
+  have "$1" || fail "cannot change ${what}: $1 is not installed"
   if ! out="$("$@" 2>&1)"; then
     out="$(printf '%s\n' "${out}" | sed '/^$/d' | tail -n 1)"
     case "${out,,}" in
@@ -149,6 +154,18 @@ keyboard_set() {
   fi
   if [[ -n "${variant}" ]] && ! listed "${variant}" "$(keyboard_variants "${layout}")"; then
     fail "the keyboard layout '${layout}' has no variant '${variant}'"
+  fi
+  # Debian: the keyboard is /etc/default/keyboard, which localed may not set
+  # (its D-Bus policy rejects SetX11Keyboard): retrobox-set-keyboard, as root
+  if [[ -f "${KEYBOARD_FILE}" ]]; then
+    local helper
+    for helper in ${KEYBOARD_HELPERS}; do
+      [[ -x "${helper}" ]] && break
+      helper=""
+    done
+    [[ -n "${helper}" ]] || fail "cannot change the keyboard layout: retrobox-set-keyboard is not installed (install.sh, or the retrobox-system-settings package)"
+    change "the keyboard layout" pkexec --disable-internal-agent "${helper}" "${layout}" "${variant:-none}"
+    return 0
   fi
   mapfile -t current < <(keyboard_current)
   # the model and options the system had stay
