@@ -18,8 +18,12 @@
 #   packaging/build-deb.sh [VERSION] [OUTPUT_DIR]
 #
 # VERSION defaults to the latest tag (v1.2 -> 1.2), else 0.0.0; OUTPUT_DIR to
-# dist/. Neither session starts by itself: the labwc one belongs to a user and
-# a TTY (its install.sh), the Openbox one to the display manager's settings.
+# dist/. A session belongs to a user and a TTY (labwc) or to the display
+# manager's settings (Openbox), so none starts by itself. The labwc one is set
+# up by whoever declares the machine: if /etc/retrobox/session-labwc.conf
+# exists, the package's postinst applies it (every install,
+# upgrade and dpkg-reconfigure; running it again changes nothing) and its prerm
+# takes the service away; without the file the package changes nothing.
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -55,6 +59,12 @@ add() {
 # command STAGE NAME TARGET: /usr/bin/NAME -> /opt/retrobox/TARGET (the tree lives in RETROBOX_PATH, thus absolute)
 command_link() {
   ln -s "/opt/retrobox/$3" "$1/usr/bin/$2"
+}
+
+# maintainer_script STAGE NAME: DEBIAN/NAME, its text on stdin
+maintainer_script() {
+  cat >"$1/DEBIAN/$2"
+  chmod 0755 "$1/DEBIAN/$2"
 }
 
 # control STAGE NAME DEPENDS RECOMMENDS DESCRIPTION...
@@ -105,15 +115,43 @@ build "${stage}" retrobox-system-settings
 ## retrobox-session-labwc
 stage="$(new_package retrobox-session-labwc)"
 add "${stage}" install.sh bin/retrobox-session-labwc libexec/mouse-hide libexec/mouse-show \
-  libexec/retrobox-audio-jack libexec/retrobox-switch-display share/labwc
+  libexec/retrobox-audio-jack libexec/retrobox-switch-display libexec/retrobox-session-apply share/labwc
+mkdir -p "${stage}/usr/share/doc/retrobox-session-labwc/examples"
+cp "${ROOT}/share/examples/session-labwc.conf" "${stage}/usr/share/doc/retrobox-session-labwc/examples/"
 command_link "${stage}" retrobox-session-install install.sh
+command_link "${stage}" retrobox-session-apply libexec/retrobox-session-apply
+maintainer_script "${stage}" postinst <<'SCRIPT'
+#!/bin/sh
+# Sets the labwc session up from /etc/retrobox/session-labwc.conf
+# if the machine declares one (see retrobox-session-apply); idempotent. A
+# file that is wrong fails here, so a machine never looks configured when it is not.
+set -e
+if [ "$1" = configure ]; then
+    /opt/retrobox/libexec/retrobox-session-apply apply
+fi
+exit 0
+SCRIPT
+maintainer_script "${stage}" prerm <<'SCRIPT'
+#!/bin/sh
+# Takes away what the postinst set up in the system (the service and the
+# polkit rule). The files in the user's home are the user's: they stay.
+set -e
+case "$1" in
+remove | deconfigure)
+    /opt/retrobox/libexec/retrobox-session-apply remove || true
+    ;;
+esac
+exit 0
+SCRIPT
 control "${stage}" retrobox-session-labwc \
-  "retrobox-system-settings (= ${VERSION}), libpam-systemd, labwc, pipewire-pulse, foot | alacritty, dbus-bin" \
+  "retrobox-system-settings (= ${VERSION}), libpam-systemd, util-linux, labwc, pipewire-pulse, foot | alacritty, dbus-bin" \
   "dbus-user-session, wlr-randr, wlrctl, xwayland, pulseaudio-utils, kbd" \
   "Retrobox as the machine's only interface: labwc session" \
   "A labwc (Wayland) session started at boot on a TTY by a systemd service," \
-  "for minimal systems with no display manager. The user who plays sets it" \
-  "up with: retrobox-session-install --tty N"
+  "for minimal systems with no display manager. A machine declares it in" \
+  "/etc/retrobox/session-labwc.conf (user and TTY) and the" \
+  "package sets it up on install, upgrade and dpkg-reconfigure; otherwise the" \
+  "user who plays sets it up with: retrobox-session-install --tty N"
 build "${stage}" retrobox-session-labwc
 
 ## retrobox-session-openbox

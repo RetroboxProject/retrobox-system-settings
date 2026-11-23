@@ -53,8 +53,33 @@ retrobox-session-install --tty 1      # the same install.sh
 | Package | What it has |
 |---|---|
 | `retrobox-system-settings` | what every console needs: `retrobox-system-settings`, `retrobox-polkit-rule`, the volume keys' `retrobox-volume` |
-| `retrobox-session-labwc` | the labwc session and its installer (`retrobox-session-install`) |
+| `retrobox-session-labwc` | the labwc session, its installer (`retrobox-session-install`) and `retrobox-session-apply`, which sets it up from the machine's declaration (below) |
 | `retrobox-session-openbox` | the Openbox session and its `/usr/share/xsessions/retrobox-openbox.desktop` |
+
+### Unattended: declare the machine
+
+With the packages the session can be set up with nobody at the keyboard (an image build, a preseed, a provisioning script). Write the declaration *before* installing the package (an example is in `share/examples/session-labwc.conf` and, installed, in `/usr/share/doc/retrobox-session-labwc/examples/`):
+
+```bash
+# /etc/retrobox/session-labwc.conf
+RETROBOX_USER=neon          # the user who plays: must exist already, with a home, and not be root
+RETROBOX_TTY=2              # the gaming TTY (1-12)
+#RETROBOX_ON_QUIT=poweroff  # optional: poweroff or shell
+```
+
+and `sudo apt install ./retrobox-system-settings_*_all.deb ./retrobox-session-labwc_*_all.deb`. The package's `postinst` runs `retrobox-session-apply`, which runs `install.sh --user NAME --tty N` as root:
+
+- **Idempotent.** Every install, upgrade and `dpkg-reconfigure retrobox-session-labwc` (or `sudo retrobox-session-apply`) leads the machine to the same state: a service or rule that is already right is not rewritten, an edited unit or a damaged copy in the home is put back, and an upgrade refreshes the user's copy of this tree.
+- **Reproducible.** The declaration is the whole input. Paths are the ones of the user's passwd entry (`~/.local/share/retrobox-session-labwc`, ...): the environment of whoever runs it, `XDG_*` included, is ignored. The file is parsed, never sourced, and three keys only.
+- **No file, no session.** Without the declaration the package changes nothing. A declaration that is wrong (no such user, a TTY out of range, a different TTY from the installed one) fails the `configure` before anything is written, so a machine never looks configured when it is not.
+- **Root writes `/etc`; the user writes the home.** The service, the polkit rule and the settings helper are written by root; the files of the user (the copy of the tree, labwc's config, `50-labwc.ini`) by that user, in a login shell, never by root in a home it does not own.
+- **Safe in a chroot.** It starts nothing and asks systemd nothing when it is not running: the service starts at the next boot (`systemctl start retrobox-session-labwc` on a live machine).
+- **A machine with the old install** (`retrobox-labwc`) ends with one service: its service and polkit rule are removed by their fixed names and mark, its TTY is the one that counts (a different one in the declaration is refused first), and the user's files move to the new names.
+- **Removal.** `apt remove` (`prerm`) and `retrobox-session-apply remove` take away the service and the polkit rule, only if this installer wrote them; the home of the user stays (`install.sh --uninstall`, as that user, removes it).
+
+`sudo tests/root-mode-test.sh` checks all of it with a throwaway user.
+
+### What the installer sets up
 
 The installer needs root for two files only (it asks for your password through `sudo`; `--no-system` skips both): `/etc/systemd/system/retrobox-session-labwc.service`, enabled at boot, and the polkit rule below (`--no-polkit` skips just the rule). The service takes the gaming TTY over from its getty (`Conflicts=getty@ttyN`), logs your user in through PAM (a real logind session, which labwc needs), switches to that VT (`chvt N`) and runs the session from a login shell, so your `PATH` is the one of your profile. When it ends, however it ends, the getty comes back. `./install.sh --check` prints the unit it would write.
 

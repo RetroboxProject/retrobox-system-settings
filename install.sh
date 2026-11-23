@@ -37,9 +37,19 @@
 #
 # Once installed, the TTY cannot be changed: uninstall first, then install.
 #
+# As root (what the retrobox-session-labwc package does when it is configured,
+# through retrobox-session-apply): --user NAME sets up the session of NAME, with
+# no password to ask. The service, the polkit rule and the settings helper are
+# written as root; NAME's files are then made by NAME (a login shell, never by
+# root in a home it does not own). Paths are always NAME's home (the XDG
+# variables are ignored), so the same input gives the same machine. A re-run
+# changes nothing. --uninstall as root removes the system part only (the
+# service and the rule; a package removal never touches a home).
+#
 # Usage: ./install.sh [--tty N] [--on-quit poweroff|shell] [--no-system] [--no-polkit] [--force]
 #        ./install.sh --check [--tty N]
 #        ./install.sh --uninstall
+#        ./install.sh --user NAME --tty N [--on-quit poweroff|shell] [--no-polkit] [--force]   (as root)
 #   --tty N       gaming TTY (1-12); required the first time
 #   --on-quit X   what happens when Retrobox quits normally (exit status 0):
 #                 poweroff (the default the first time) or shell (the service
@@ -50,6 +60,7 @@
 #   --no-polkit   do not write the polkit rule
 #   --force       install even if a check fails
 #   --uninstall   remove everything this script set up, /etc files included
+#   --user NAME   as root: set up the session of NAME (see above)
 #   -h, --help
 set -euo pipefail
 
@@ -57,6 +68,41 @@ SELF="$(readlink -f -- "${BASH_SOURCE[0]}")"
 readonly SELF
 SELF_DIR="$(dirname -- "${SELF}")"
 readonly SELF_DIR
+
+# Root mode (--user NAME): every path below is NAME's, from the passwd entry,
+# never root's nor an XDG variable's.
+ROOT_USER=""
+for ((i = 1; i < $#; i++)); do
+  [[ "${!i}" == "--user" ]] || continue
+  j=$((i + 1))
+  ROOT_USER="${!j}"
+done
+if [[ -n "${ROOT_USER}" ]]; then
+  ((EUID == 0)) || {
+    echo "[ERR ] --user is for root (the package's setup): run it as ${ROOT_USER} instead" >&2
+    exit 1
+  }
+  [[ "${ROOT_USER}" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || {
+    echo "[ERR ] --user needs a user name, got '${ROOT_USER}'" >&2
+    exit 1
+  }
+  PASSWD_ENTRY="$(getent passwd "${ROOT_USER}")" || {
+    echo "[ERR ] no such user: ${ROOT_USER}" >&2
+    exit 1
+  }
+  IFS=: read -r _ _ PASSWD_UID _ _ PASSWD_HOME _ <<<"${PASSWD_ENTRY}"
+  [[ "${PASSWD_UID}" != 0 ]] || {
+    echo "[ERR ] the session is for the user who plays, not root" >&2
+    exit 1
+  }
+  [[ "${PASSWD_HOME}" == /* && -d "${PASSWD_HOME}" ]] || {
+    echo "[ERR ] ${ROOT_USER} has no home directory (${PASSWD_HOME})" >&2
+    exit 1
+  }
+  HOME="${PASSWD_HOME}"
+  export HOME
+  unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_STATE_HOME RETROBOX_CONFIGDIR RETROBOX_LABWC_CONFIG_DIR
+fi
 # shellcheck source=libexec/retrobox-common.sh
 source "${SELF_DIR}/libexec/retrobox-common.sh"
 
@@ -70,6 +116,7 @@ readonly DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/retrobox-session-labwc
 readonly OLD_DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/retrobox-labwc"
 readonly OLD_CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox-labwc"
 readonly OLD_UNIT_NAME="retrobox-labwc.service"
+readonly OLD_POLKIT_RULE_NAME="50-retrobox-labwc.rules"
 readonly CONFIG_DIR="${RETROBOX_LABWC_CONFIG_DIR}"
 readonly RETROBOX_CONFIG_DIR="${RETROBOX_CONFIGDIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox}"
 readonly TTY_DROPIN="${RETROBOX_CONFIG_DIR}/retrobox.ini.d/50-labwc.ini"
@@ -107,6 +154,18 @@ die() {
 usage() { sed -n '2,/^set -euo/p' "${SELF}" | sed '$d; s/^# \{0,1\}//'; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# As root (the package's setup) there is nothing to elevate to.
+if ((EUID == 0)); then
+  sudo() { "$@"; }
+fi
+
+# systemd re-reads its units; in a chroot (an image being built) there is
+# nobody to tell, and the unit is read at the first boot.
+daemon_reload() {
+  [[ -d /run/systemd/system ]] || return 0
+  sudo systemctl daemon-reload
+}
 
 # is_ours FILE: whether this installer wrote FILE (under either name)
 is_ours() { grep -qsE "${OURS_RE}" "$1"; }
@@ -311,6 +370,8 @@ check_service() {
   if [[ ! -f "${file}" ]]; then
     bad "the service ${UNIT_NAME} is not installed"
     NEED_SERVICE=1
+  elif [[ -n "${RETROBOX_SESSION_SERVICE_READY:-}" ]]; then
+    ok "the service ${UNIT_NAME} was set up as root just before (tty${tty})"
   elif [[ "$(cat -- "${file}")" != "$(unit_content "${tty}")" ]]; then
     bad "the service ${UNIT_NAME} is not up to date"
     NEED_SERVICE=1
@@ -345,7 +406,7 @@ install_service() {
     sudo install -d -m 0755 -- "${SYSTEMD_DIR}" || die "sudo failed"
     sudo install -m 0644 -- "${tmp}" "${file}" || die "sudo failed"
     rm -f -- "${tmp}"
-    sudo systemctl daemon-reload
+    daemon_reload
   fi
   if ! systemctl is-enabled --quiet "${UNIT_NAME}" 2>/dev/null; then
     sudo systemctl enable "${UNIT_NAME}" >/dev/null 2>&1 || die "could not enable ${UNIT_NAME}"
@@ -376,7 +437,7 @@ remove_old_dropin() {
   is_ours "${dropin}" && sudo rm -f -- "${dropin}"
   sudo rmdir --ignore-fail-on-non-empty -- "$(dirname -- "${dropin}")" 2>/dev/null || true
   [[ -z "${enabled}" ]] || sudo systemctl disable "getty@tty${tty}.service" >/dev/null 2>&1 || true
-  sudo systemctl daemon-reload
+  daemon_reload
 }
 
 # merge_notes: SYSTEM_NOTES plus, for each key it lacks, the line an earlier
@@ -622,12 +683,12 @@ migrate_old_names() {
       if [[ -n "${unit}" ]]; then
         sudo systemctl disable "${OLD_UNIT_NAME}" >/dev/null 2>&1 || true
         is_ours "${unit}" && sudo rm -f -- "${unit}"
-        sudo systemctl daemon-reload
+        daemon_reload
       fi
       [[ -z "${rule}" ]] || ! is_ours "${rule}" || sudo rm -f -- "${rule}"
-    else
+    elif [[ -z "${RETROBOX_SESSION_SERVICE_READY:-}" ]]; then
       warn "Left in the system (remove as root, and disable ${OLD_UNIT_NAME}): ${unit} ${rule}"
-    fi
+    fi # (else root took them away just before, in do_install_root)
   fi
   mkdir -p -- "$(dirname -- "${DATA_DIR}")"
   mv -- "${OLD_DATA_DIR}" "${DATA_DIR}"
@@ -746,7 +807,7 @@ uninstall_system() {
     info "Removing ${unit} (sudo)..."
     sudo systemctl disable "${UNIT_NAME}" >/dev/null 2>&1 || true
     is_ours "${unit}" && sudo rm -f -- "${unit}"
-    sudo systemctl daemon-reload
+    daemon_reload
   fi
   remove_old_dropin
 }
@@ -799,6 +860,104 @@ do_uninstall() {
   fi
 }
 
+# ----------------------------------------------------------- root mode
+# NAME's files are made by NAME: the install runs again as NAME, in a login
+# shell (the PATH of the profile, as the service has), with the service
+# known to be in place.
+delegate_user_part() {
+  local runuser_bin args cmd
+  runuser_bin="$(PATH="${PATH}:/usr/sbin:/sbin" command -v runuser || true)"
+  [[ -n "${runuser_bin}" ]] || die "runuser (util-linux) is needed to set up the files of ${USER_NAME}"
+  args="--tty ${TTY} --no-system"
+  [[ -z "${ON_QUIT}" ]] || args+=" --on-quit ${ON_QUIT}"
+  ((FORCE == 0)) || args+=" --force"
+  info "Setting up the files of ${USER_NAME} (as ${USER_NAME})..."
+  printf -v cmd 'unset XDG_DATA_HOME XDG_CONFIG_HOME RETROBOX_CONFIGDIR; RETROBOX_SESSION_SERVICE_READY=1 exec %q %s' "${SELF}" "${args}"
+  exec "${runuser_bin}" -l "${USER_NAME}" -c "${cmd}"
+}
+
+# The service and the polkit rule of an install under the old names
+# (retrobox-labwc), found by their fixed names and their mark: two services
+# fighting over a TTY is what leaving them would give. The files in the home
+# are moved to the new names by the user's part.
+remove_old_system_files_root() {
+  local unit rule
+  unit="${SYSTEMD_DIR}/${OLD_UNIT_NAME}"
+  rule="${POLKIT_DIR}/${OLD_POLKIT_RULE_NAME}"
+  if [[ -f "${unit}" ]] && is_ours "${unit}"; then
+    info "Removing the old service ${unit}..."
+    systemctl disable "${OLD_UNIT_NAME}" >/dev/null 2>&1 || true
+    rm -f -- "${unit}"
+    daemon_reload
+    if systemctl is-active --quiet "${OLD_UNIT_NAME}" 2>/dev/null; then
+      warn "The old session (${OLD_UNIT_NAME}) is still running: reboot to start the new one."
+    fi
+  fi
+  if [[ -f "${rule}" ]] && is_ours "${rule}"; then
+    info "Removing the old polkit rule ${rule}..."
+    rm -f -- "${rule}"
+  fi
+}
+
+do_install_root() {
+  local prev old_manifest="${OLD_DATA_DIR}/.install-manifest"
+  [[ -n "${TTY_ARG}" ]] || die "which TTY? --user needs --tty N"
+  TTY="$((10#${TTY_ARG}))"
+  # the manifest of NAME (under either name) only tells the TTY; a different one
+  # is refused before /etc is touched
+  if ! prev="$(installed_tty)" && [[ -f "${old_manifest}" ]]; then
+    prev="$(sed -n 's/^tty=//p' "${old_manifest}" | head -n1)"
+  fi
+  if is_valid_tty "${prev:-x}" && ((10#${prev} != TTY)); then
+    die "${USER_NAME} is already installed on tty$((10#${prev})): run ${DATA_DIR}/install.sh --uninstall as ${USER_NAME} before using tty${TTY}"
+  fi
+  case "${DATA_DIR}${CONFIG_DIR}" in
+  *[[:space:]\&\<\>\'\"\\]*) die "paths with spaces or quotes are not supported (${DATA_DIR}, ${CONFIG_DIR})" ;;
+  *) ;;
+  esac
+
+  info "Checking the system for tty${TTY}..."
+  check_dependencies "${TTY}"
+  check_service "${TTY}"
+  report_keyboard
+  if ((FAILED == 1)); then
+    ((FORCE == 1)) || die "fix what is marked [MISS] above and run it again (or use --force)"
+    warn "Installing anyway (--force)."
+  fi
+  remove_old_system_files_root
+  install_service "${TTY}"
+  if ((POLKIT == 1)); then
+    install_polkit_rule
+    install_settings_helper
+  fi
+  delegate_user_part
+}
+
+# The system part only, found by its fixed paths and its mark (never from a
+# manifest in a home): what a package removal takes away.
+do_uninstall_system_root() {
+  local unit rule found=0
+  unit="$(unit_path)"
+  rule="$(polkit_rule_path)"
+  if [[ -f "${unit}" ]] && is_ours "${unit}"; then
+    info "Removing ${unit}..."
+    systemctl disable "${UNIT_NAME}" >/dev/null 2>&1 || true
+    rm -f -- "${unit}"
+    daemon_reload
+    found=1
+  fi
+  if [[ -f "${rule}" ]] && is_ours "${rule}"; then
+    info "Removing ${rule}..."
+    rm -f -- "${rule}"
+    found=1
+  fi
+  if ((found == 0)); then
+    info "Nothing to remove in the system."
+  else
+    ok "Removed the system part. The files in the home of the user stay (as that user: install.sh --uninstall)."
+  fi
+}
+
 # ------------------------------------------------------------------ main
 TTY_ARG=""
 FORCE=0
@@ -837,6 +996,10 @@ while (($# > 0)); do
     UNINSTALL=1
     shift
     ;;
+  --user)
+    : "${2:?--user needs a user name}"
+    shift 2
+    ;;
   -h | --help)
     usage
     exit 0
@@ -845,14 +1008,19 @@ while (($# > 0)); do
   esac
 done
 
-USER_NAME="$(id -un)"
+USER_NAME="${ROOT_USER:-$(id -un)}"
 readonly USER_NAME
-((EUID != 0)) || die "run it as the user who plays, not as root: it needs no privileges"
+if ((EUID == 0 && UNINSTALL == 0)) && [[ -z "${ROOT_USER}" ]]; then
+  die "run it as the user who plays, not as root (as root: --user NAME, or --uninstall for the system part)"
+fi
+if ((EUID == 0 && SYSTEM == 0)); then
+  die "--no-system makes no sense as root: the system part is what root is for"
+fi
 [[ -z "${ON_QUIT}" || "${ON_QUIT}" == "poweroff" || "${ON_QUIT}" == "shell" ]] || die "--on-quit needs poweroff or shell"
 [[ -z "${TTY_ARG}" ]] || is_valid_tty "${TTY_ARG}" || die "--tty needs a VT number between 1 and 12"
 
 if ((UNINSTALL == 1)); then
-  do_uninstall
+  if ((EUID == 0)); then do_uninstall_system_root; else do_uninstall; fi
   exit 0
 fi
 
@@ -870,4 +1038,4 @@ if ((CHECK_ONLY == 1)); then
   exit "${FAILED}"
 fi
 
-do_install
+if ((EUID == 0)); then do_install_root; else do_install; fi
