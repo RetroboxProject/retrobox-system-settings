@@ -18,12 +18,12 @@
 #   packaging/build-deb.sh [VERSION] [OUTPUT_DIR]
 #
 # VERSION defaults to the latest tag (v1.2 -> 1.2), else 0.0.0; OUTPUT_DIR to
-# dist/. A session belongs to a user and a TTY (labwc) or to the display
-# manager's settings (Openbox), so none starts by itself. The labwc one is set
-# up by whoever declares the machine: if /etc/retrobox/session-labwc.conf
-# exists, the package's postinst applies it (every install,
-# upgrade and dpkg-reconfigure; running it again changes nothing) and its prerm
-# takes the service away; without the file the package changes nothing.
+# dist/. The labwc session sets itself up: its postinst runs install.sh
+# --machine (every install, upgrade and dpkg-reconfigure; running it again
+# changes nothing), which reads the machine's retrobox.ini under /etc/retrobox
+# ([advanced] labwc_user, else the user with uid 1000; labwc_tty, else 8), and
+# its prerm takes the service away. The Openbox one belongs to the display
+# manager's settings, so it needs nothing.
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -115,19 +115,19 @@ build "${stage}" retrobox-system-settings
 ## retrobox-session-labwc
 stage="$(new_package retrobox-session-labwc)"
 add "${stage}" install.sh bin/retrobox-session-labwc libexec/mouse-hide libexec/mouse-show \
-  libexec/retrobox-audio-jack libexec/retrobox-switch-display libexec/retrobox-session-apply share/labwc
+  libexec/retrobox-audio-jack libexec/retrobox-switch-display share/labwc
 mkdir -p "${stage}/usr/share/doc/retrobox-session-labwc/examples"
-cp "${ROOT}/share/examples/session-labwc.conf" "${stage}/usr/share/doc/retrobox-session-labwc/examples/"
+cp "${ROOT}/share/examples/session-labwc.ini" "${stage}/usr/share/doc/retrobox-session-labwc/examples/"
 command_link "${stage}" retrobox-session-install install.sh
-command_link "${stage}" retrobox-session-apply libexec/retrobox-session-apply
 maintainer_script "${stage}" postinst <<'SCRIPT'
 #!/bin/sh
-# Sets the labwc session up from /etc/retrobox/session-labwc.conf
-# if the machine declares one (see retrobox-session-apply); idempotent. A
-# file that is wrong fails here, so a machine never looks configured when it is not.
+# Sets the labwc session up for the machine (user and TTY from retrobox.ini
+# under /etc/retrobox, else the user with uid 1000 and tty 8); idempotent.
+# What cannot be set up fails here, so a machine never looks configured
+# when it is not.
 set -e
 if [ "$1" = configure ]; then
-    /opt/retrobox/libexec/retrobox-session-apply apply
+    /opt/retrobox/install.sh --machine
 fi
 exit 0
 SCRIPT
@@ -138,20 +138,20 @@ maintainer_script "${stage}" prerm <<'SCRIPT'
 set -e
 case "$1" in
 remove | deconfigure)
-    /opt/retrobox/libexec/retrobox-session-apply remove || true
+    /opt/retrobox/install.sh --uninstall || true
     ;;
 esac
 exit 0
 SCRIPT
 control "${stage}" retrobox-session-labwc \
-  "retrobox-system-settings (= ${VERSION}), libpam-systemd, util-linux, labwc, pipewire-pulse, foot | alacritty, dbus-bin" \
-  "dbus-user-session, wlr-randr, wlrctl, xwayland, pulseaudio-utils, kbd" \
+  "retrobox-system-settings (= ${VERSION}), libpam-systemd, util-linux, kbd, labwc, pipewire-pulse, foot | alacritty, dbus-bin" \
+  "dbus-user-session, wlr-randr, wlrctl, xwayland, pulseaudio-utils" \
   "Retrobox as the machine's only interface: labwc session" \
   "A labwc (Wayland) session started at boot on a TTY by a systemd service," \
-  "for minimal systems with no display manager. A machine declares it in" \
-  "/etc/retrobox/session-labwc.conf (user and TTY) and the" \
-  "package sets it up on install, upgrade and dpkg-reconfigure; otherwise the" \
-  "user who plays sets it up with: retrobox-session-install --tty N"
+  "for minimal systems with no display manager. The package sets it up by" \
+  "itself, on install, upgrade and dpkg-reconfigure: for the user with uid" \
+  "1000 on tty8, or the user and TTY (labwc_user, labwc_tty) of the" \
+  "[advanced] section of /etc/retrobox/retrobox.ini."
 build "${stage}" retrobox-session-labwc
 
 ## retrobox-session-openbox

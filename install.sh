@@ -37,19 +37,27 @@
 #
 # Once installed, the TTY cannot be changed: uninstall first, then install.
 #
-# As root (what the retrobox-session-labwc package does when it is configured,
-# through retrobox-session-apply): --user NAME sets up the session of NAME, with
-# no password to ask. The service, the polkit rule and the settings helper are
-# written as root; NAME's files are then made by NAME (a login shell, never by
-# root in a home it does not own). Paths are always NAME's home (the XDG
-# variables are ignored), so the same input gives the same machine. A re-run
-# changes nothing. --uninstall as root removes the system part only (the
-# service and the rule; a package removal never touches a home).
+# As root (what the retrobox-session-labwc package does when it is configured):
+# --machine sets up the session of the machine, with no password to ask, and
+# --user NAME the one of NAME. The machine is read from retrobox.ini under
+# /etc/retrobox (and its retrobox.ini.d, never from a home):
+#   [advanced]
+#   labwc_user = neon   the user who plays (else the user with uid 1000)
+#   labwc_tty = 8       the gaming TTY (else 8)
+# The service, the polkit rule and the settings helper are written as root;
+# NAME's files are then made by NAME (a login shell, never by root in a home
+# it does not own). Paths are always NAME's home (the XDG variables are
+# ignored), so the same input gives the same machine. A re-run changes
+# nothing, and a new labwc_tty moves the session to it (dpkg-reconfigure
+# retrobox-session-labwc, or this script again). --uninstall as root removes
+# the system part only (the service and the rule; a package removal never
+# touches a home).
 #
 # Usage: ./install.sh [--tty N] [--on-quit poweroff|shell] [--no-system] [--no-polkit] [--force]
 #        ./install.sh --check [--tty N]
 #        ./install.sh --uninstall
-#        ./install.sh --user NAME --tty N [--on-quit poweroff|shell] [--no-polkit] [--force]   (as root)
+#        ./install.sh --machine [--tty N] [--on-quit poweroff|shell] [--no-polkit] [--force]   (as root)
+#        ./install.sh --user NAME [--tty N] [--on-quit poweroff|shell] [--no-polkit] [--force]   (as root)
 #   --tty N       gaming TTY (1-12); required the first time
 #   --on-quit X   what happens when Retrobox quits normally (exit status 0):
 #                 poweroff (the default the first time) or shell (the service
@@ -60,6 +68,7 @@
 #   --no-polkit   do not write the polkit rule
 #   --force       install even if a check fails
 #   --uninstall   remove everything this script set up, /etc files included
+#   --machine     as root: set up the session of the machine (see above)
 #   --user NAME   as root: set up the session of NAME (see above)
 #   -h, --help
 set -euo pipefail
@@ -69,21 +78,58 @@ readonly SELF
 SELF_DIR="$(dirname -- "${SELF}")"
 readonly SELF_DIR
 
-# Root mode (--user NAME): every path below is NAME's, from the passwd entry,
-# never root's nor an XDG variable's.
+# machine_setting SECTION KEY: a value of the machine's own retrobox.ini
+# (/etc/retrobox and its retrobox.ini.d, never a home: what this installer
+# writes in a home must not outrank the word of the machine).
+machine_setting() {
+  (
+    # shellcheck source=libexec/retrobox-common.sh
+    source "${SELF_DIR}/libexec/retrobox-common.sh"
+    RETROBOX_CONFIGDIR=/dev/null get_retrobox_setting "$1" "$2"
+  )
+}
+
+# Root mode (--machine, or --user NAME): every path below is the user's, from
+# the passwd entry, never root's nor an XDG variable's.
 ROOT_USER=""
-for ((i = 1; i < $#; i++)); do
-  [[ "${!i}" == "--user" ]] || continue
-  j=$((i + 1))
-  ROOT_USER="${!j}"
+MACHINE=0
+for ((i = 1; i <= $#; i++)); do
+  case "${!i}" in
+  --machine) MACHINE=1 ;;
+  --user)
+    j=$((i + 1))
+    ROOT_USER="${!j:-}"
+    ;;
+  *) ;;
+  esac
 done
+if ((MACHINE == 1)); then
+  ((EUID == 0)) || {
+    echo "[ERR ] --machine is for root (the package's setup): the user who plays runs it with --tty N" >&2
+    exit 1
+  }
+  [[ -z "${ROOT_USER}" ]] || {
+    echo "[ERR ] --machine picks the user (labwc_user in /etc/retrobox/retrobox.ini): do not give --user" >&2
+    exit 1
+  }
+  ROOT_USER="$(machine_setting advanced labwc_user || true)"
+  if [[ -z "${ROOT_USER}" ]]; then
+    ROOT_USER="$(getent passwd "${RETROBOX_DEFAULT_UID:-1000}" | cut -d: -f1 || true)"
+    if [[ -z "${ROOT_USER}" ]]; then
+      echo "[INFO] no user to set the labwc session up for (no [advanced] labwc_user in /etc/retrobox/retrobox.ini," \
+        "and no user with uid ${RETROBOX_DEFAULT_UID:-1000}): nothing done."
+      echo "[INFO] Set labwc_user and run: dpkg-reconfigure retrobox-session-labwc"
+      exit 0
+    fi
+  fi
+fi
 if [[ -n "${ROOT_USER}" ]]; then
   ((EUID == 0)) || {
     echo "[ERR ] --user is for root (the package's setup): run it as ${ROOT_USER} instead" >&2
     exit 1
   }
   [[ "${ROOT_USER}" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] || {
-    echo "[ERR ] --user needs a user name, got '${ROOT_USER}'" >&2
+    echo "[ERR ] the user must be a user name, got '${ROOT_USER}'" >&2
     exit 1
   }
   PASSWD_ENTRY="$(getent passwd "${ROOT_USER}")" || {
@@ -713,10 +759,15 @@ do_install() {
   PREV_NOTES="$(grep -E '^(system_unit|polkit_rule|settings_helper|polkit_policy|system_dropin|getty_enabled)=' "${MANIFEST}" 2>/dev/null || true)"
   if prev="$(installed_tty)"; then
     if [[ -n "${TTY_ARG}" ]] && ((10#${TTY_ARG} != 10#${prev})); then
-      die "already installed on tty${prev}: run ./install.sh --uninstall before using tty${TTY_ARG}"
+      # the root part (the package's setup) has put the service on the new TTY already
+      [[ -n "${RETROBOX_SESSION_SERVICE_READY:-}" ]] ||
+        die "already installed on tty${prev}: run ./install.sh --uninstall before using tty${TTY_ARG}"
+      TTY="$((10#${TTY_ARG}))"
+      info "Moving from tty${prev} to tty${TTY}."
+    else
+      TTY="$((10#${prev}))"
+      info "Already installed on tty${TTY}: updating."
     fi
-    TTY="$((10#${prev}))"
-    info "Already installed on tty${TTY}: updating."
   else
     [[ -n "${TTY_ARG}" ]] || die "which TTY? run it again with --tty N (e.g. --tty 1)"
     TTY="$((10#${TTY_ARG}))"
@@ -900,16 +951,15 @@ remove_old_system_files_root() {
 }
 
 do_install_root() {
-  local prev old_manifest="${OLD_DATA_DIR}/.install-manifest"
-  [[ -n "${TTY_ARG}" ]] || die "which TTY? --user needs --tty N"
-  TTY="$((10#${TTY_ARG}))"
-  # the manifest of NAME (under either name) only tells the TTY; a different one
-  # is refused before /etc is touched
-  if ! prev="$(installed_tty)" && [[ -f "${old_manifest}" ]]; then
-    prev="$(sed -n 's/^tty=//p' "${old_manifest}" | head -n1)"
+  local prev
+  if [[ -z "${TTY_ARG}" ]]; then
+    TTY_ARG="$(machine_setting advanced labwc_tty || true)"
+    TTY_ARG="${TTY_ARG:-8}"
   fi
-  if is_valid_tty "${prev:-x}" && ((10#${prev} != TTY)); then
-    die "${USER_NAME} is already installed on tty$((10#${prev})): run ${DATA_DIR}/install.sh --uninstall as ${USER_NAME} before using tty${TTY}"
+  is_valid_tty "${TTY_ARG}" || die "the TTY (labwc_tty in /etc/retrobox/retrobox.ini, or --tty) must be a VT number between 1 and 12, got '${TTY_ARG}'"
+  TTY="$((10#${TTY_ARG}))"
+  if prev="$(installed_tty)" && is_valid_tty "${prev}" && ((10#${prev} != TTY)); then
+    info "${USER_NAME} is on tty$((10#${prev})): moving the session to tty${TTY}."
   fi
   case "${DATA_DIR}${CONFIG_DIR}" in
   *[[:space:]\&\<\>\'\"\\]*) die "paths with spaces or quotes are not supported (${DATA_DIR}, ${CONFIG_DIR})" ;;
@@ -1000,6 +1050,9 @@ while (($# > 0)); do
     : "${2:?--user needs a user name}"
     shift 2
     ;;
+  --machine)
+    shift
+    ;;
   -h | --help)
     usage
     exit 0
@@ -1011,7 +1064,7 @@ done
 USER_NAME="${ROOT_USER:-$(id -un)}"
 readonly USER_NAME
 if ((EUID == 0 && UNINSTALL == 0)) && [[ -z "${ROOT_USER}" ]]; then
-  die "run it as the user who plays, not as root (as root: --user NAME, or --uninstall for the system part)"
+  die "run it as the user who plays, not as root (as root: --machine or --user NAME, or --uninstall for the system part)"
 fi
 if ((EUID == 0 && SYSTEM == 0)); then
   die "--no-system makes no sense as root: the system part is what root is for"
