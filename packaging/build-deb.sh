@@ -21,8 +21,9 @@
 # dist/. The labwc session sets itself up: its postinst runs install.sh
 # --machine (every install, upgrade and dpkg-reconfigure; running it again
 # changes nothing), which reads the machine's retrobox.ini under /etc/retrobox
-# ([advanced] labwc_user, else the user with uid 1000; labwc_tty, else 8), and
-# its prerm takes the service away. The Openbox one belongs to the display
+# ([advanced] labwc_user, else the user with uid 1000), and takes the TTY from
+# its debconf dialog (dpkg-reconfigure; else labwc_tty, else 8); its prerm takes
+# the service away. The Openbox one belongs to the display
 # manager's settings, so it needs nothing.
 set -euo pipefail
 
@@ -115,19 +116,76 @@ build "${stage}" retrobox-system-settings
 ## retrobox-session-labwc
 stage="$(new_package retrobox-session-labwc)"
 add "${stage}" install.sh bin/retrobox-session-labwc libexec/mouse-hide libexec/mouse-show \
-  libexec/retrobox-audio-jack libexec/retrobox-switch-display share/labwc
+  libexec/retrobox-audio-jack libexec/retrobox-switch-display libexec/retrobox-session-config share/labwc
 mkdir -p "${stage}/usr/share/doc/retrobox-session-labwc/examples"
 cp "${ROOT}/share/examples/session-labwc.ini" "${stage}/usr/share/doc/retrobox-session-labwc/examples/"
 command_link "${stage}" retrobox-session-install install.sh
+# The TTY is asked with debconf (a dialog on install and on dpkg-reconfigure)
+cat >"${stage}/DEBIAN/templates" <<'TEMPLATES'
+Template: retrobox-session-labwc/tty
+Type: select
+Choices: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+Default: 8
+Description: TTY for the Retrobox session:
+ The labwc session starts at boot on the virtual terminal chosen here. That
+ TTY gives up its login prompt to the session; the others keep theirs (switch
+ between them with Ctrl+Alt+F1 to F12). The change applies at the next boot.
+TEMPLATES
+chmod 0644 "${stage}/DEBIAN/templates"
+maintainer_script "${stage}" config <<'SCRIPT'
+#!/bin/sh
+# Asks which TTY the labwc session takes over (on install and on
+# dpkg-reconfigure). Before the first answer the dialog starts from the
+# machine's [advanced] labwc_tty of /etc/retrobox, when it has a valid one.
+set -e
+. /usr/share/debconf/confmodule
+
+# The last [advanced] labwc_tty of the machine's retrobox.ini and its drop-ins
+machine_tty() {
+    for file in /etc/retrobox/retrobox.ini /etc/retrobox/retrobox.ini.d/*.ini; do
+        [ -r "${file}" ] || continue
+        awk -F= '
+            /^[ \t]*\[/ { in_advanced = ($0 ~ /^[ \t]*\[[ \t]*advanced[ \t]*\]/); next }
+            in_advanced && $1 ~ /^[ \t]*labwc_tty[ \t]*$/ { gsub(/[ \t]/, "", $2); value = $2 }
+            END { print value }
+        ' "${file}"
+    done | grep . | tail -n 1
+}
+
+db_fget retrobox-session-labwc/tty seen
+if [ "${RET}" = false ]; then
+    tty="$(machine_tty)"
+    case "${tty}" in
+    [1-9] | 1[0-2]) db_set retrobox-session-labwc/tty "${tty}" ;;
+    esac
+fi
+db_input high retrobox-session-labwc/tty || true
+db_go || true
+exit 0
+SCRIPT
 maintainer_script "${stage}" postinst <<'SCRIPT'
 #!/bin/sh
-# Sets the labwc session up for the machine (user and TTY from retrobox.ini
-# under /etc/retrobox, else the user with uid 1000 and tty 8); idempotent.
-# What cannot be set up fails here, so a machine never looks configured
-# when it is not.
+# Sets the labwc session up for the machine: the user from retrobox.ini under
+# /etc/retrobox (else the user with uid 1000) and the TTY of the debconf
+# dialog (once answered; else labwc_tty of that retrobox.ini, else tty 8);
+# idempotent. What cannot be set up fails here, so a machine never looks
+# configured when it is not.
 set -e
+. /usr/share/debconf/confmodule
+
 if [ "$1" = configure ]; then
-    /opt/retrobox/install.sh --machine
+    tty=""
+    db_fget retrobox-session-labwc/tty seen
+    if [ "${RET}" = true ]; then
+        db_get retrobox-session-labwc/tty
+        tty="${RET}"
+    fi
+    db_stop
+    if [ -n "${tty}" ]; then
+        /opt/retrobox/install.sh --machine --tty "${tty}"
+    else
+        /opt/retrobox/install.sh --machine
+    fi
 fi
 exit 0
 SCRIPT
@@ -143,8 +201,18 @@ remove | deconfigure)
 esac
 exit 0
 SCRIPT
+maintainer_script "${stage}" postrm <<'SCRIPT'
+#!/bin/sh
+# Forgets the debconf answers when the package is purged.
+set -e
+if [ "$1" = purge ] && [ -e /usr/share/debconf/confmodule ]; then
+    . /usr/share/debconf/confmodule
+    db_purge
+fi
+exit 0
+SCRIPT
 control "${stage}" retrobox-session-labwc \
-  "retrobox-system-settings (= ${VERSION}), libpam-systemd, util-linux, kbd, labwc, pipewire-pulse, foot | alacritty, dbus-bin" \
+  "retrobox-system-settings (= ${VERSION}), libpam-systemd, util-linux, kbd, labwc, pipewire-pulse, foot | alacritty, dbus-bin, debconf (>= 0.5) | debconf-2.0" \
   "dbus-user-session, wlr-randr, wlrctl, xwayland, pulseaudio-utils" \
   "Retrobox as the machine's only interface: labwc session" \
   "A labwc (Wayland) session started at boot on a TTY by a systemd service," \

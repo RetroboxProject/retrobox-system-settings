@@ -43,21 +43,22 @@
 # /etc/retrobox (and its retrobox.ini.d, never from a home):
 #   [advanced]
 #   labwc_user = neon   the user who plays (else the user with uid 1000)
-#   labwc_tty = 8       the gaming TTY (else 8)
-# The service, the polkit rule and the settings helper are written as root;
-# NAME's files are then made by NAME (a login shell, never by root in a home
-# it does not own). Paths are always NAME's home (the XDG variables are
-# ignored), so the same input gives the same machine. A re-run changes
-# nothing, and a new labwc_tty moves the session to it (dpkg-reconfigure
-# retrobox-session-labwc, or this script again). --uninstall as root removes
-# the system part only (the service and the rule; a package removal never
-# touches a home).
+#   labwc_tty = 8       the gaming TTY (else 8; --tty wins, as the package's debconf answer does)
+#   labwc_on_quit = poweroff   when Retrobox quits normally: poweroff (else) or shell
+# The service, the polkit rule and the settings helper are written as root,
+# and that is all: nothing is generated in the home of NAME. The service runs
+# this tree where it is (/opt/retrobox for the package) and renders labwc's
+# config into its runtime directory each time it starts, so the same input
+# gives the same machine. A re-run changes nothing, and a new --tty (the
+# package passes the one of its debconf dialog: dpkg-reconfigure
+# retrobox-session-labwc) moves the session to it. --uninstall as root
+# removes the system part only (the service and the rule).
 #
 # Usage: ./install.sh [--tty N] [--on-quit poweroff|shell] [--no-system] [--no-polkit] [--force]
 #        ./install.sh --check [--tty N]
 #        ./install.sh --uninstall
-#        ./install.sh --machine [--tty N] [--on-quit poweroff|shell] [--no-polkit] [--force]   (as root)
-#        ./install.sh --user NAME [--tty N] [--on-quit poweroff|shell] [--no-polkit] [--force]   (as root)
+#        ./install.sh --machine [--tty N] [--no-polkit] [--force]   (as root)
+#        ./install.sh --user NAME [--tty N] [--no-polkit] [--force]   (as root)
 #   --tty N       gaming TTY (1-12); required the first time
 #   --on-quit X   what happens when Retrobox quits normally (exit status 0):
 #                 poweroff (the default the first time) or shell (the service
@@ -367,8 +368,12 @@ unit_path() {
 # unless a start or restart of this service is already queued: the getty's
 # own start would cancel it, and "systemctl restart" would stop the session
 # and never start it again.
+# As root (the package's setup) the session runs this tree where it is, and
+# labwc's config is rendered by the service itself at every start.
 unit_content() {
-  local tty="$1" chvt systemctl_bin
+  local tty="$1" chvt systemctl_bin session_dir="${DATA_DIR}" runtime_name="${UNIT_NAME%.service}"
+  # as root nothing of the session lives in a home
+  [[ -z "${ROOT_USER}" ]] || session_dir="${SELF_DIR}"
   chvt="$(PATH="${PATH}:/usr/sbin:/sbin" command -v chvt || true)"
   chvt="${chvt:-/usr/bin/chvt}"
   systemctl_bin="$(command -v systemctl || true)"
@@ -396,7 +401,18 @@ UtmpIdentifier=tty${tty}
 UtmpMode=user
 Environment=RETROBOX_LABWC_TTY=${tty}
 ExecStartPre=+-${chvt} ${tty}
-ExecStart=/bin/bash -lc 'exec ${DATA_DIR}/bin/retrobox-session-labwc'
+UNIT
+  if [[ -n "${ROOT_USER}" ]]; then
+    # labwc's config is rendered at every start, in the service's runtime directory
+    cat <<UNIT
+RuntimeDirectory=${runtime_name}
+RuntimeDirectoryMode=0755
+Environment=RETROBOX_LABWC_CONFIG_DIR=/run/${runtime_name}/labwc
+ExecStartPre=/bin/bash -lc 'exec ${SELF_DIR}/libexec/retrobox-session-config'
+UNIT
+  fi
+  cat <<UNIT
+ExecStart=/bin/bash -lc 'exec ${session_dir}/bin/retrobox-session-labwc'
 ExecStopPost=+-/bin/sh -c '${systemctl_bin} list-jobs --no-legend | grep -qE "${UNIT_NAME} +(start|restart)" || exec ${systemctl_bin} --no-block start getty@tty${tty}.service'
 Restart=no
 TimeoutStopSec=12
@@ -912,20 +928,11 @@ do_uninstall() {
 }
 
 # ----------------------------------------------------------- root mode
-# NAME's files are made by NAME: the install runs again as NAME, in a login
-# shell (the PATH of the profile, as the service has), with the service
-# known to be in place.
-delegate_user_part() {
-  local runuser_bin args cmd
-  runuser_bin="$(PATH="${PATH}:/usr/sbin:/sbin" command -v runuser || true)"
-  [[ -n "${runuser_bin}" ]] || die "runuser (util-linux) is needed to set up the files of ${USER_NAME}"
-  args="--tty ${TTY} --no-system"
-  [[ -z "${ON_QUIT}" ]] || args+=" --on-quit ${ON_QUIT}"
-  ((FORCE == 0)) || args+=" --force"
-  info "Setting up the files of ${USER_NAME} (as ${USER_NAME})..."
-  printf -v cmd 'unset XDG_DATA_HOME XDG_CONFIG_HOME RETROBOX_CONFIGDIR; RETROBOX_SESSION_SERVICE_READY=1 exec %q %s' "${SELF}" "${args}"
-  exec "${runuser_bin}" -l "${USER_NAME}" -c "${cmd}"
-}
+# Nothing of the session is generated in the home of NAME: the service runs
+# this tree where it is and renders labwc's config each time it starts. What
+# an earlier version of this script left there (a copy of the tree, labwc's
+# config, 50-labwc.ini) is not read any more; install.sh --uninstall, run as
+# NAME, removes it.
 
 # The service and the polkit rule of an install under the old names
 # (retrobox-labwc), found by their fixed names and their mark: two services
@@ -951,18 +958,14 @@ remove_old_system_files_root() {
 }
 
 do_install_root() {
-  local prev
   if [[ -z "${TTY_ARG}" ]]; then
     TTY_ARG="$(machine_setting advanced labwc_tty || true)"
     TTY_ARG="${TTY_ARG:-8}"
   fi
   is_valid_tty "${TTY_ARG}" || die "the TTY (labwc_tty in /etc/retrobox/retrobox.ini, or --tty) must be a VT number between 1 and 12, got '${TTY_ARG}'"
   TTY="$((10#${TTY_ARG}))"
-  if prev="$(installed_tty)" && is_valid_tty "${prev}" && ((10#${prev} != TTY)); then
-    info "${USER_NAME} is on tty$((10#${prev})): moving the session to tty${TTY}."
-  fi
-  case "${DATA_DIR}${CONFIG_DIR}" in
-  *[[:space:]\&\<\>\'\"\\]*) die "paths with spaces or quotes are not supported (${DATA_DIR}, ${CONFIG_DIR})" ;;
+  case "${SELF_DIR}" in
+  *[[:space:]\&\<\>\'\"\\]*) die "paths with spaces or quotes are not supported (${SELF_DIR})" ;;
   *) ;;
   esac
 
@@ -980,7 +983,11 @@ do_install_root() {
     install_polkit_rule
     install_settings_helper
   fi
-  delegate_user_part
+  ok "Installed. The session of ${USER_NAME} starts at boot on tty${TTY}."
+  info "Start it now: systemctl start ${UNIT_NAME}"
+  if systemctl is-active --quiet "${UNIT_NAME}" 2>/dev/null; then
+    info "The session is running with the unit it started with: systemctl restart ${UNIT_NAME} (or reboot) to apply the change."
+  fi
 }
 
 # The system part only, found by its fixed paths and its mark (never from a
@@ -1070,6 +1077,9 @@ if ((EUID == 0 && SYSTEM == 0)); then
   die "--no-system makes no sense as root: the system part is what root is for"
 fi
 [[ -z "${ON_QUIT}" || "${ON_QUIT}" == "poweroff" || "${ON_QUIT}" == "shell" ]] || die "--on-quit needs poweroff or shell"
+if ((EUID == 0)) && [[ -n "${ON_QUIT}" ]]; then
+  die "--on-quit is for the user's own install: as root, the machine's [advanced] labwc_on_quit in retrobox.ini says it"
+fi
 [[ -z "${TTY_ARG}" ]] || is_valid_tty "${TTY_ARG}" || die "--tty needs a VT number between 1 and 12"
 
 if ((UNINSTALL == 1)); then

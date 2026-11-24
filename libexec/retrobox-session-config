@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Renders labwc's configuration for the gaming session from the templates of
+# this tree (share/labwc) into the directory in RETROBOX_LABWC_CONFIG_DIR.
+#
+# retrobox-session-labwc.service runs it before every start (ExecStartPre), with
+# its own runtime directory as destination: the configuration is always the one
+# of the tree the service runs, and nothing the session needs is generated in a
+# home. systemd removes the directory when the service stops.
+#
+# It also writes on_quit, which the session reads from that directory: what a
+# normal quit of Retrobox does, from [advanced] labwc_on_quit of the machine's
+# retrobox.ini (/etc/retrobox and its retrobox.ini.d, never a home): poweroff
+# (the default) or shell (the service ends and the TTY gets its login prompt).
+#
+# Usage: RETROBOX_LABWC_CONFIG_DIR=DIR retrobox-session-config
+set -euo pipefail
+
+# Taken before retrobox-common.sh, whose default is a directory in a home.
+readonly DEST_DIR="${RETROBOX_LABWC_CONFIG_DIR:-}"
+
+SELF="$(readlink -f -- "${BASH_SOURCE[0]}")"
+readonly SELF
+SCRIPT_DIR="$(dirname -- "${SELF}")"
+readonly SCRIPT_DIR
+# shellcheck source=libexec/retrobox-common.sh
+source "${SCRIPT_DIR}/retrobox-common.sh"
+
+# What the templates' @LABWC_DIR@ stands for: the root of this tree.
+readonly TREE_DIR="${RETROBOX_LABWC_DIR}"
+
+die() {
+  echo "retrobox-session-config: $*" >&2
+  exit 1
+}
+
+# machine_setting SECTION KEY: a value of the machine's own retrobox.ini.
+machine_setting() {
+  RETROBOX_CONFIGDIR=/dev/null get_retrobox_setting "$1" "$2"
+}
+
+# Escapes a string for the replacement side of a sed s||| expression.
+sed_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//|/\\|}"
+  printf '%s' "${value//&/\\&}"
+}
+
+# render TEMPLATE DESTINATION: fills in the @...@ placeholders of this tree
+# (and nothing else: rc.xml has wpctl's own @DEFAULT_AUDIO_SOURCE@).
+render() {
+  sed -e "s|@LABWC_DIR@|$(sed_escape "${TREE_DIR}")|g" \
+    -e "s|@TERMINAL@|$(sed_escape "${TERMINAL}")|g" \
+    -e "s|@SCREENSHOT_CMD@|$(sed_escape "${SCREENSHOT_CMD}")|g" \
+    "$1" >"$2"
+}
+
+main() {
+  local on_quit root name staging
+  [[ -n "${DEST_DIR}" ]] || die "RETROBOX_LABWC_CONFIG_DIR is not set (the service sets it to its runtime directory)"
+
+  on_quit="$(machine_setting advanced labwc_on_quit || true)"
+  on_quit="${on_quit:-poweroff}"
+  [[ "${on_quit}" == "poweroff" || "${on_quit}" == "shell" ]] ||
+    die "[advanced] labwc_on_quit must be poweroff or shell, got '${on_quit}'"
+
+  TERMINAL="foot"
+  command -v foot >/dev/null 2>&1 || TERMINAL="alacritty"
+  SCREENSHOT_CMD="retrobox-screenshot"
+  if root="$(find_retrobox_root)" && [[ -x "${root}/bin/retrobox-screenshot" ]]; then
+    SCREENSHOT_CMD="${root}/bin/retrobox-screenshot"
+  fi
+
+  # Built apart and moved in place, so labwc never reads a half-written config.
+  staging="${DEST_DIR}.new.$$"
+  rm -rf -- "${staging}"
+  mkdir -p -- "${staging}"
+  for name in rc.xml autostart; do
+    render "${TREE_DIR}/share/labwc/${name}.in" "${staging}/${name}"
+  done
+  # no paths in it: linked
+  ln -s -- "${TREE_DIR}/share/labwc/themerc-override" "${staging}/themerc-override"
+  printf '%s\n' "${on_quit}" >"${staging}/on_quit"
+  rm -rf -- "${DEST_DIR}"
+  mv -- "${staging}" "${DEST_DIR}"
+}
+
+main
