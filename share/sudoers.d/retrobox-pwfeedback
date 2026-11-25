@@ -1,0 +1,7 @@
+# Installed by the retrobox-system-settings package (/etc/sudoers.d): sudo
+# shows an asterisk for each character typed at its password prompt, so what
+# is typed can be seen, in a terminal and in the overlay's task screen (an
+# emulator's installer asking for its build dependencies), where a controller
+# or an on-screen keyboard types it. Remove this file to go back to sudo's
+# silent prompt.
+Defaults pwfeedback

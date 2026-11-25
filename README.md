@@ -132,6 +132,10 @@ A machine whose own updater also updates Retrobox says so in its `retrobox.ini` 
 
 The overlay's *System* page offers it (*Update system*) when `retrobox-system-settings update available` says it can (`retrobox-update` installed, `pkexec`, apt), and shows what `retrobox-system-settings update run` prints in its task screen: that runs `retrobox-update` as root through `pkexec`, under its own polkit action (`org.retroboxproject.system-settings.update`, which names the package's `/opt/retrobox/bin/retrobox-update` or `install.sh`'s copy in `/usr/local/libexec/retrobox-system-settings/`), granted to the console's user by the polkit rule. In a terminal, `sudo retrobox-update` does the same.
 
+### sudo's password prompt
+
+The `retrobox-system-settings` package also makes sudo show an asterisk for each character typed at its password prompt (`Defaults pwfeedback`, in `/etc/sudoers.d/retrobox-pwfeedback`): what an emulator's installer asks in the overlay's task screen (its build dependencies) is typed with a controller or an on-screen keyboard, where nothing on the screen would otherwise say it was taken. It is a configuration file of the package: remove it, or change it, and an upgrade keeps it so.
+
 ## Openbox session
 
 For a machine whose display manager logs the console's user in (no TTY service, no `install.sh`): install `retrobox-session-openbox` and choose its session, `retrobox-openbox` (lightdm: `autologin-session=retrobox-openbox`). `retrobox-openbox-session` then:
