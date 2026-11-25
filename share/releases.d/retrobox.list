@@ -1,0 +1,9 @@
+# GitHub repositories whose releases bring Retrobox's packages, in install
+# order (retrobox-update). Only the packages that are installed are updated;
+# after a repository, the names of packages to install when they are not.
+# /etc/retrobox/releases.d/retrobox.list replaces this list.
+RetroboxProject/retrobox-core
+RetroboxProject/retrobox-system-settings
+RetroboxProject/retrobox-mangohud
+RetroboxProject/retrobox-emulationstation
+RetroboxProject/retrobox-overlay

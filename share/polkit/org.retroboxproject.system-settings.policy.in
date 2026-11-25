@@ -21,4 +21,17 @@
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">@HELPER@</annotate>
   </action>
+
+  <!-- retrobox-update, run with pkexec by retrobox-system-settings update
+       (the overlay's System page): the system's update, and Retrobox's. -->
+  <action id="org.retroboxproject.system-settings.update">
+    <description>Update the system and Retrobox</description>
+    <message>Authentication is required to update the system.</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">@UPDATER@</annotate>
+  </action>
 </policyconfig>

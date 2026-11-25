@@ -27,6 +27,11 @@ jobs:
       - name: Root-mode test (the package's setup)
         run: sudo tests/root-mode-test.sh
 
+      - name: Update test (retrobox-update, fake GitHub API)
+        run: |
+          sudo apt-get install -y -qq jq
+          tests/update-test.sh
+
       - name: Build the .deb
         run: |
           git fetch --tags --quiet || true

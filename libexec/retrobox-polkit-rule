@@ -6,6 +6,8 @@
 #     from EmulationStation's system settings in console mode; on Debian the
 #     keyboard and the language through retrobox-settings-helper, the polkit
 #     action org.retroboxproject.system-settings.set),
+#   * update the system (retrobox-update, from the overlay's System page; the
+#     polkit action org.retroboxproject.system-settings.update),
 #   * with --unit, start, stop and restart that systemd unit (the labwc
 #     session's service).
 # install.sh writes it for the labwc session; a system set up otherwise (a
@@ -35,14 +37,16 @@ if [[ -n "${unit}" ]]; then
 // Written ${mark}: ${user} may power off and reboot from any
 // session (EmulationStation sends systemctl poweroff and reboot), start,
 // stop and restart ${unit} (ssh included), and set the system's time
-// zone, keyboard layout and language (retrobox-system-settings, from EmulationStation).
+// zone, keyboard layout and language (retrobox-system-settings, from EmulationStation)
+// and update the system (retrobox-update, from the overlay).
 RULE
 else
   cat <<RULE
 // Written ${mark}: ${user} may power off and reboot from any
 // session (EmulationStation sends systemctl poweroff and reboot), and set
 // the system's time zone, keyboard layout and language (retrobox-system-settings,
-// from EmulationStation).
+// from EmulationStation), and update the system (retrobox-update, from the
+// overlay).
 RULE
 fi
 cat <<RULE
@@ -67,7 +71,8 @@ cat <<'RULE'
   if (action.id == "org.freedesktop.timedate1.set-timezone" ||
       action.id == "org.freedesktop.locale1.set-keyboard" ||
       action.id == "org.freedesktop.locale1.set-locale" ||
-      action.id == "org.retroboxproject.system-settings.set") {
+      action.id == "org.retroboxproject.system-settings.set" ||
+      action.id == "org.retroboxproject.system-settings.update") {
     return polkit.Result.YES;
   }
   return polkit.Result.NOT_HANDLED;

@@ -126,6 +126,11 @@ grep -q '"org.retroboxproject.system-settings.set"' "${RULE}" || fail "polkit ru
 cmp -s "${ROOT}/libexec/retrobox-settings-helper" "${RETROBOX_SETTINGS_HELPER}" || fail "settings helper not installed"
 grep -q "exec.path\">${RETROBOX_SETTINGS_HELPER}<" "${POLICY}" && grep -q 'id="org.retroboxproject.system-settings.set"' "${POLICY}" \
   || fail "settings helper's polkit action wrong: $(cat "${POLICY}")"
+UPDATER="$(dirname "${RETROBOX_SETTINGS_HELPER}")/retrobox-update"
+cmp -s "${ROOT}/bin/retrobox-update" "${UPDATER}" && cmp -s "${ROOT}/share/releases.d/retrobox.list" "$(dirname "${UPDATER}")/releases.d/retrobox.list" \
+  || fail "retrobox-update or its list not installed"
+grep -q "exec.path\">${UPDATER}<" "${POLICY}" && grep -q 'id="org.retroboxproject.system-settings.update"' "${POLICY}" \
+  && grep -q '"org.retroboxproject.system-settings.update"' "${RULE}" || fail "retrobox-update's polkit action or rule wrong"
 grep -q "^system_settings = ${DATA}/bin/retrobox-system-settings\$" "${HOME}/.config/retrobox/retrobox.ini.d/50-labwc.ini" || fail "[core] system_settings not written"
 ! grep -qx 'console_mode = true' "${HOME}/.config/retrobox/retrobox.ini.d/50-labwc.ini" \
   || fail "console_mode still written: $(cat "${HOME}/.config/retrobox/retrobox.ini.d/50-labwc.ini")"
@@ -146,7 +151,7 @@ pass "the TTY cannot change without uninstall; re-install is idempotent"
 [[ "$(cat "${HOME}/.profile")" == $'# my profile\nexport FOO=1' ]] || fail "profile not restored: $(cat "${HOME}/.profile")"
 [[ ! -e "${UNIT}" && ! -e "${STUB_STATE}/enabled-retrobox-session-labwc.service" ]] || fail "service not removed"
 [[ ! -e "${RULE}" ]] || fail "polkit rule not removed"
-[[ ! -e "${POLICY}" && ! -e "${RETROBOX_SETTINGS_HELPER}" ]] || fail "settings helper or its action not removed"
+[[ ! -e "${POLICY}" && ! -e "${RETROBOX_SETTINGS_HELPER}" && ! -e "${UPDATER}" ]] || fail "settings helper, retrobox-update or their action not removed"
 pass "uninstall removes the service, the rule and the settings helper, and restores the profile"
 
 # --- 5b. an install of the previous version (login hook + autologin drop-in) is migrated ---

@@ -91,11 +91,12 @@ build() {
 
 ## retrobox-system-settings
 stage="$(new_package retrobox-system-settings)"
-add "${stage}" bin/retrobox-system-settings bin/retrobox-xdp-dns libexec/retrobox-polkit-rule \
-  libexec/retrobox-volume libexec/retrobox-common.sh libexec/retrobox-settings-helper
+add "${stage}" bin/retrobox-system-settings bin/retrobox-xdp-dns bin/retrobox-update libexec/retrobox-polkit-rule \
+  libexec/retrobox-volume libexec/retrobox-common.sh libexec/retrobox-settings-helper share/releases.d
 # the polkit action of retrobox-settings-helper (Debian's keyboard and language, with pkexec)
 mkdir -p "${stage}/usr/share/polkit-1/actions"
 sed -e "s|@HELPER@|/${RETROBOX_PATH}/libexec/retrobox-settings-helper|" \
+  -e "s|@UPDATER@|/${RETROBOX_PATH}/bin/retrobox-update|" \
   -e "s|@MARK@|Installed by the retrobox-system-settings package|" \
   "${ROOT}/share/polkit/org.retroboxproject.system-settings.policy.in" \
   >"${stage}/usr/share/polkit-1/actions/org.retroboxproject.system-settings.policy"
@@ -103,14 +104,17 @@ cp "${ROOT}/README.md" "${stage}/usr/share/doc/retrobox-system-settings/"
 command_link "${stage}" retrobox-system-settings bin/retrobox-system-settings
 command_link "${stage}" retrobox-xdp-dns bin/retrobox-xdp-dns
 command_link "${stage}" retrobox-polkit-rule libexec/retrobox-polkit-rule
+command_link "${stage}" retrobox-update bin/retrobox-update
 control "${stage}" retrobox-system-settings "bash, systemd" \
-  "retrobox-core, polkitd, pkexec, xkb-data, tzdata, wireplumber | pulseaudio-utils" \
+  "retrobox-core, polkitd, pkexec, xkb-data, tzdata, wireplumber | pulseaudio-utils, curl, jq" \
   "Retrobox as the machine's only interface: common part" \
   "What every Retrobox console needs, whichever its session:" \
   "retrobox-system-settings, which sets the system's time zone and keyboard" \
   "layout from EmulationStation's console mode, retrobox-xdp-dns, XDP's DNS" \
-  "over TLS on and off (its network settings' toggle), and retrobox-polkit-rule," \
-  "the polkit rule that lets the console's user do that, power off and reboot."
+  "over TLS on and off (its network settings' toggle), retrobox-update, the" \
+  "system's update with Retrobox's packages (the overlay's System page), and" \
+  "retrobox-polkit-rule, the polkit rule that lets the console's user do that," \
+  "power off and reboot."
 build "${stage}" retrobox-system-settings
 
 ## retrobox-session-labwc

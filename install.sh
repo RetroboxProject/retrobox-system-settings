@@ -182,6 +182,10 @@ readonly POLKIT_DIR="${RETROBOX_POLKIT_DIR:-/etc/polkit-1/rules.d}"
 readonly POLKIT_ACTIONS_DIR="${RETROBOX_POLKIT_ACTIONS_DIR:-/usr/share/polkit-1/actions}"
 readonly POLICY_NAME="org.retroboxproject.system-settings.policy"
 readonly SETTINGS_HELPER="${RETROBOX_SETTINGS_HELPER:-/usr/local/libexec/retrobox-system-settings/retrobox-settings-helper}"
+# retrobox-update (the system's update, from the overlay), next to it, with
+# its list of Retrobox's repositories (releases.d)
+UPDATER="$(dirname -- "${SETTINGS_HELPER}")/retrobox-update"
+readonly UPDATER
 readonly KEYBOARD_FILE="${RETROBOX_KEYBOARD_FILE:-/etc/default/keyboard}"
 readonly LOCALE_DEFAULT="${RETROBOX_LOCALE_DEFAULT:-/etc/default/locale}"
 readonly SYSTEMD_DIR="${RETROBOX_SYSTEMD_DIR:-/etc/systemd/system}"
@@ -550,17 +554,20 @@ install_polkit_rule() {
 }
 
 helper_policy_content() {
-  sed -e "s|@HELPER@|${SETTINGS_HELPER}|" -e "s|@MARK@|Written ${GENERATED_MARK} - do not edit|" \
+  sed -e "s|@HELPER@|${SETTINGS_HELPER}|" -e "s|@UPDATER@|${UPDATER}|" \
+    -e "s|@MARK@|Written ${GENERATED_MARK} - do not edit|" \
     "${SELF_DIR}/share/polkit/${POLICY_NAME}.in"
 }
 
 # Where the keyboard and the language are /etc/default/keyboard and
 # /etc/default/locale (Debian), localed can't set them: retrobox-settings-helper
 # does, as root, through pkexec and the polkit action of its root-owned copy
-# (the polkit rule grants that action to the user).
+# (the polkit rule grants that action to the user). On Debian (apt) the
+# system's update goes the same way: retrobox-update, next to it.
 install_settings_helper() {
-  local policy="${POLKIT_ACTIONS_DIR}/${POLICY_NAME}" tmp
-  [[ -f "${KEYBOARD_FILE}" || -e "${LOCALE_DEFAULT}" ]] || return 0
+  local policy="${POLKIT_ACTIONS_DIR}/${POLICY_NAME}" tmp lists
+  lists="$(dirname -- "${UPDATER}")/releases.d"
+  [[ -f "${KEYBOARD_FILE}" || -e "${LOCALE_DEFAULT}" ]] || have apt-get || return 0
   if [[ -f "${policy}" ]] && ! is_ours "${policy}"; then
     ok "settings helper in place (the retrobox-system-settings package's)"
     return 0
@@ -570,14 +577,18 @@ install_settings_helper() {
   fi
   tmp="$(mktemp)"
   helper_policy_content >"${tmp}"
-  if cmp -s -- "${tmp}" "${policy}" && cmp -s -- "${SELF_DIR}/libexec/retrobox-settings-helper" "${SETTINGS_HELPER}"; then
+  if cmp -s -- "${tmp}" "${policy}" && cmp -s -- "${SELF_DIR}/libexec/retrobox-settings-helper" "${SETTINGS_HELPER}" &&
+    cmp -s -- "${SELF_DIR}/bin/retrobox-update" "${UPDATER}" &&
+    cmp -s -- "${SELF_DIR}/share/releases.d/retrobox.list" "${lists}/retrobox.list"; then
     rm -f -- "${tmp}"
     ok "settings helper already in place (${SETTINGS_HELPER})"
     return 0
   fi
   have sudo || die "sudo is needed for the settings helper (or use --no-polkit)"
-  info "Installing the settings helper and its polkit action (sudo): ${SETTINGS_HELPER} ${policy}"
+  info "Installing the settings helper, retrobox-update and their polkit actions (sudo): ${SETTINGS_HELPER} ${UPDATER} ${policy}"
   sudo install -D -m 0755 -- "${SELF_DIR}/libexec/retrobox-settings-helper" "${SETTINGS_HELPER}" || die "sudo failed"
+  sudo install -D -m 0755 -- "${SELF_DIR}/bin/retrobox-update" "${UPDATER}" || die "sudo failed"
+  sudo install -D -m 0644 -- "${SELF_DIR}/share/releases.d/retrobox.list" "${lists}/retrobox.list" || die "sudo failed"
   sudo install -D -m 0644 -- "${tmp}" "${policy}" || die "sudo failed"
   rm -f -- "${tmp}"
   SYSTEM_NOTES+="settings_helper=${SETTINGS_HELPER}"$'\n'"polkit_policy=${policy}"$'\n'
@@ -884,8 +895,12 @@ uninstall_system() {
     sudo rm -f -- "${policy}"
   fi
   if [[ -n "${helper}" ]] && grep -qs '^# retrobox-settings-helper: ' "${helper}"; then
-    info "Removing ${helper} (sudo)..."
+    info "Removing ${helper} and retrobox-update next to it (sudo)..."
     sudo rm -f -- "${helper}"
+    if grep -qs '^# retrobox-update: ' "$(dirname -- "${helper}")/retrobox-update"; then
+      sudo rm -f -- "$(dirname -- "${helper}")/retrobox-update" "$(dirname -- "${helper}")/releases.d/retrobox.list"
+      sudo rmdir --ignore-fail-on-non-empty -- "$(dirname -- "${helper}")/releases.d" 2>/dev/null || true
+    fi
     sudo rmdir --ignore-fail-on-non-empty -- "$(dirname -- "${helper}")" 2>/dev/null || true
   fi
   if [[ -n "${unit}" ]]; then

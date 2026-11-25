@@ -1,0 +1,393 @@
+#!/usr/bin/env bash
+# retrobox-update: updates a Debian that runs Retrobox as its only interface
+# (Retrobox's console), in one go:
+#
+#   retrobox-update [--allow-prereleases] [--no-apt] [--no-recommends]
+#   retrobox-update [--allow-prereleases] --download-only DIR
+#
+#   1. apt-get update and apt-get dist-upgrade.
+#   2. Retrobox's packages, from the GitHub releases of the repositories in
+#      the lists of share/releases.d (retrobox.list: retrobox-core,
+#      retrobox-system-settings, retrobox-emulationstation...), each replaced
+#      by a list of the same name in /etc/retrobox/releases.d, where a machine
+#      can add its own: for each repository, the newest release, and from it
+#      the .deb files of packages that are installed here and newer than what
+#      is installed, checked against the release's SHA256SUMS. Packages that
+#      are not installed are not added, except the ones a list names after
+#      its repository (REPO PACKAGE...): those are installed if they are not.
+#      (When Retrobox has an apt repository, step 1 will do this.)
+#   3. apt-get autoremove --purge and apt-get clean.
+#
+# A machine with an updater of its own that updates Retrobox too ([advanced]
+# system_updater of the machine's retrobox.ini: nx-debian's nxd-update, which
+# also updates the Switch's own packages and then runs retrobox-update
+# --no-apt) gets that one instead: retrobox-update hands over to it.
+#
+# --no-apt only does step 2 (for such an updater, which does the rest);
+# --no-recommends installs no Recommends (a system built without them).
+# Only releases GitHub does not mark as pre-releases are used, unless
+# --allow-prereleases. --download-only DIR stops after downloading and
+# checking the packages of step 2 into DIR: no apt, nothing installed, root
+# not needed.
+#
+# Runs itself through sudo when it is not root (EmulationStation's overlay
+# runs it through pkexec: retrobox-system-settings update). Sleep, shutdown
+# and the power button are held off while it runs. Configuration files
+# changed by hand are kept (dpkg's --force-confold). $GITHUB_TOKEN avoids
+# GitHub's rate limit for anonymous requests (sudo keeps it).
+set -euo pipefail
+
+SELF="$(readlink -f -- "${BASH_SOURCE[0]}")"
+SELF_DIR="$(dirname -- "${SELF}")"
+PRERELEASES=0
+NO_APT=0
+RECOMMENDS=1
+DOWNLOAD_ONLY=""
+SYSCONF="${RETROBOX_SYSCONFDIR:-/etc/retrobox}"
+# the shipped lists: the package's share/releases.d, or install.sh's copy
+LISTS_DIRS="${RETROBOX_RELEASES_DIRS:-${SELF_DIR}/../share/releases.d ${SELF_DIR}/releases.d}"
+STATE_DIR="${RETROBOX_UPDATE_STATE_DIR:-/var/lib/retrobox-update}"
+API="${RETROBOX_GITHUB_API:-https://api.github.com}"
+# Release assets that must never be installed.
+EXCLUDE_RE='dbgsym|debuginfo|debugsource'
+# Any distro marker in an asset name: an asset carrying one is used only when
+# it is the one of this Debian release; assets without any are generic.
+ANY_TAG_RE='(debian|ubuntu|fedora)[-_.]?[0-9]|[._-]fc[0-9]+|[._-]el[0-9]+|trixie|bookworm|bullseye|forky|focal|jammy|noble|resolute|oracular|plucky|questing'
+
+log() { printf 'retrobox-update: %s\n' "$*" >&2; }
+warn() { printf 'retrobox-update: warning: %s\n' "$*" >&2; }
+die() {
+    printf 'retrobox-update: %s\n' "$*" >&2
+    exit 1
+}
+
+usage() {
+    sed -n '2,/^set -euo/p' "${SELF}" | sed '$d; s/^# \{0,1\}//'
+}
+
+# the arguments as given, for running again through sudo, systemd-inhibit or
+# the machine's own updater (the loop below consumes them)
+ARGS=("$@")
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --allow-prereleases) PRERELEASES=1; shift ;;
+        --no-apt) NO_APT=1; shift ;;
+        --no-recommends) RECOMMENDS=0; shift ;;
+        --download-only) DOWNLOAD_ONLY="${2:?--download-only needs a directory}"; shift 2 ;;
+        -h | --help) usage; exit 0 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+
+if ! command -v dpkg > /dev/null 2>&1 || ! command -v apt-get > /dev/null 2>&1; then
+    die "this system has no apt: update it with its own updater"
+fi
+
+# The machine's own updater runs as it is: it gets root itself.
+# machine_updater: the machine's own updater ([advanced] system_updater of
+# /etc/retrobox/retrobox.ini and its retrobox.ini.d, never a home's)
+machine_updater() {
+    local file value=""
+    for file in "${SYSCONF}/retrobox.ini" "${SYSCONF}"/retrobox.ini.d/*.ini; do
+        [[ -r "${file}" ]] || continue
+        value="$(awk '
+            /^[[:space:]]*[#;]/ { next }
+            /^[[:space:]]*\[/ { inside = ($0 ~ /^[[:space:]]*\[[[:space:]]*advanced[[:space:]]*\]/); next }
+            inside && /^[[:space:]]*system_updater[[:space:]]*=/ {
+                sub(/^[^=]*=[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); found = $0
+            }
+            END { if (found != "") print found }' "${file}")" || true
+        [[ -z "${value}" ]] || printf '%s\n' "${value}"
+    done | tail -n 1
+}
+
+if [[ "${NO_APT}" -eq 0 && -z "${DOWNLOAD_ONLY}" ]]; then
+    updater="$(machine_updater)"
+    if [[ -n "${updater}" ]]; then
+        [[ "${updater}" == /* && -x "${updater}" ]] ||
+            die "[advanced] system_updater of ${SYSCONF}/retrobox.ini is not an executable: ${updater}"
+        [[ "$(readlink -f -- "${updater}")" != "${SELF}" ]] || die "[advanced] system_updater is retrobox-update itself"
+        log "this machine has its own updater: ${updater}"
+        flags=()
+        [[ "${PRERELEASES}" -eq 0 ]] || flags+=(--allow-prereleases)
+        exec "${updater}" "${flags[@]}"
+    fi
+fi
+
+if [[ -z "${DOWNLOAD_ONLY}" && "${EUID}" -ne 0 ]]; then
+    [[ -z "${RETROBOX_UPDATE_SUDO:-}" ]] || die "it needs root"
+    exec sudo --preserve-env=GITHUB_TOKEN -- env RETROBOX_UPDATE_SUDO=1 "${SELF}" "${ARGS[@]}"
+fi
+
+if [[ -z "${DOWNLOAD_ONLY}" && -z "${RETROBOX_UPDATE_INHIBITED:-}" && -d /run/systemd/system ]] &&
+    command -v systemd-inhibit > /dev/null 2>&1; then
+    export RETROBOX_UPDATE_INHIBITED=1
+    exec systemd-inhibit --what=sleep:shutdown:handle-power-key --who=retrobox-update \
+        --why="Updating the system" -- "${SELF}" "${ARGS[@]}"
+fi
+
+ARCH="${RETROBOX_UPDATE_ARCH:-$(dpkg --print-architecture)}"
+# this Debian release, as asset names write it ("debian13", "trixie")
+TAG_RE="${RETROBOX_UPDATE_TAG_RE:-}"
+if [[ -z "${TAG_RE}" ]]; then
+    # shellcheck source=/dev/null
+    . /etc/os-release
+    TAG_RE="debian[-_.]?${VERSION_ID:-0}|${VERSION_CODENAME:-none}"
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+APT=(apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+[[ "${RECOMMENDS}" -eq 1 ]] || APT+=(-o APT::Install-Recommends=false)
+
+# lists: the lists to read, one per name: a list of /etc/retrobox/releases.d
+# replaces the shipped one of the same name
+lists() {
+    local dir list name
+    local -A chosen=()
+    shopt -s nullglob
+    for dir in ${LISTS_DIRS} "${SYSCONF}/releases.d"; do
+        for list in "${dir}"/*.list; do
+            chosen["$(basename -- "${list}")"]="${list}"
+        done
+    done
+    shopt -u nullglob
+    # in the order of their names
+    while IFS= read -r name; do
+        [[ -z "${name}" ]] || printf '%s\n' "${chosen[${name}]}"
+    done < <(printf '%s\n' "${!chosen[@]}" | sort)
+}
+
+# api_get URL: the API's answer; when it is not one, why (GitHub's HTTP code
+# and message) on stderr, and a failure
+api_get() {
+    local -a headers=(-H "Accept: application/vnd.github+json")
+    local body code
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        headers+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+    fi
+    body="$(mktemp)"
+    code="$(curl -sSL --retry 2 -o "${body}" -w '%{http_code}' "${headers[@]}" "$1")" || code="${code:-000}"
+    if [[ "${code}" != 200 ]]; then
+        warn "${1#"${API}"}: HTTP ${code}: $(jq -r '.message? // empty' "${body}" 2> /dev/null | head -n 1)"
+        rm -f "${body}"
+        return 1
+    fi
+    cat "${body}"
+    rm -f "${body}"
+}
+
+# installed_version PACKAGE: its version if it is installed, else nothing
+installed_version() {
+    if [[ -n "${RETROBOX_UPDATE_INSTALLED:-}" ]]; then
+        # for the tests: a file of "package version" lines
+        awk -v p="$1" '$1 == p { print $2; exit }' "${RETROBOX_UPDATE_INSTALLED}"
+        return
+    fi
+    dpkg-query -W -f '${db:Status-Abbrev} ${Version}\n' "$1" 2> /dev/null |
+        awk '$1 ~ /^[ih]i/ { print $2 }'
+}
+
+# select_assets: asset names on stdin; prints the .deb files of this machine
+# (built for it and this Debian release, else generic for it, else for all)
+select_assets() {
+    local name arch_re
+    local -a all=() tagged=() generic=()
+    mapfile -t all
+    for arch_re in "[_.-]${ARCH}\\.deb\$" '[_.-]all\.deb$'; do
+        tagged=()
+        generic=()
+        for name in "${all[@]}"; do
+            [[ "${name,,}" =~ ${arch_re} && ! "${name,,}" =~ ${EXCLUDE_RE} ]] || continue
+            if [[ "${name,,}" =~ ${TAG_RE} ]]; then
+                tagged+=("${name}")
+            elif [[ ! "${name,,}" =~ ${ANY_TAG_RE} ]]; then
+                generic+=("${name}")
+            fi
+        done
+        ((${#tagged[@]} == 0)) || { printf '%s\n' "${tagged[@]}"; return 0; }
+        ((${#generic[@]} == 0)) || { printf '%s\n' "${generic[@]}"; return 0; }
+    done
+    return 1
+}
+
+# release REPO: the JSON of the release to use (see the header), or nothing
+# The one with the newest packages, never a draft, and a pre-release only with
+# --allow-prereleases: by the date of its packages, not its own, because
+# a release whose files are replaced (a "latest" one, made again on each push)
+# keeps its old date.
+# Not /releases/latest: a repository with pre-releases only answers it 404.
+release() {
+    local repo="$1"
+    api_get "${API}/repos/${repo}/releases?per_page=30" |
+        jq -c --argjson pre "${PRERELEASES}" '
+            [.[] | select(.draft != true) | select($pre == 1 or .prerelease != true)
+                | select(any(.assets[]; .name | endswith(".deb")))]
+            | max_by([.assets[] | select(.name | endswith(".deb")) | .updated_at // ""] | max) // empty'
+}
+
+# newest: .deb names on stdin; prints, for each package, the one of its
+# highest version (a release whose files are being replaced has two)
+newest() {
+    local name package version
+    local -A best=() best_version=()
+    local -a order=()
+    while IFS= read -r name; do
+        package="${name%%_*}"
+        version="${name#*_}"
+        version="${version%_*}"
+        if [[ -z "${best[${package}]:-}" ]]; then
+            order+=("${package}")
+        elif ! dpkg --compare-versions "${version}" gt "${best_version[${package}]}"; then
+            continue
+        fi
+        best["${package}"]="${name}"
+        best_version["${package}"]="${version}"
+    done
+    for package in "${order[@]}"; do
+        printf '%s\n' "${best[${package}]}"
+    done
+}
+
+# sha_of FILE SUMS: the checksum SUMS gives for FILE's name
+sha_of() {
+    awk -v f="${1##*/}" '
+        { gsub(/\r/, ""); n = $2; sub(/^\*/, "", n); sub(/^.*\//, "", n) }
+        n == f { print tolower($1); exit }' "$2"
+}
+
+# fetch REPO DIR: downloads into DIR the packages of REPO to install; prints
+# their paths
+# fetch REPO DIR [PACKAGE...]: the packages of REPO's release that are
+# installed; when the list names packages, those, installed or not (so a
+# console gets a package its image did not have yet).
+fetch() {
+    local repo="$1" dir="$2" json tag kind sums_name sums name file package version installed expected
+    shift 2
+    local -a names=() chosen=() wanted=() listed=("$@")
+    json="$(release "${repo}")" || { warn "cannot read the releases of ${repo} (see above; GITHUB_TOKEN lifts the limit of 60 anonymous requests an hour)"; return 0; }
+    if [[ -z "${json}" ]]; then
+        if [[ "${PRERELEASES}" -eq 1 ]]; then
+            log "${repo}: no release with packages"
+        else
+            log "${repo}: no release with packages (pre-releases need --allow-prereleases)"
+        fi
+        return 0
+    fi
+    tag="$(jq -r '.tag_name' <<< "${json}")"
+    kind="$(jq -r 'if .prerelease then " (pre-release)" else "" end' <<< "${json}")"
+    mapfile -t names < <(jq -r '.assets[].name' <<< "${json}")
+    mapfile -t chosen < <(printf '%s\n' "${names[@]}" | select_assets) || true
+    for name in "${chosen[@]}"; do
+        package="${name%%_*}"
+        if ((${#listed[@]} > 0)); then
+            [[ " ${listed[*]} " == *" ${package} "* ]] && wanted+=("${name}")
+        elif [[ -n "$(installed_version "${package}")" ]]; then
+            wanted+=("${name}")
+        fi
+    done
+    if ((${#wanted[@]} == 0)); then
+        log "${repo} ${tag}${kind}: none of its packages is installed"
+        return 0
+    fi
+    mapfile -t wanted < <(printf '%s\n' "${wanted[@]}" | newest)
+    # the same release and the same files as last time: nothing to download
+    if [[ -f "${STATE_DIR}/${repo//\//_}" ]] &&
+        [[ "$(cat "${STATE_DIR}/${repo//\//_}")" == "$(printf '%s\n' "${tag}" "${wanted[@]}")" ]]; then
+        log "${repo} ${tag}${kind}: up to date"
+        return 0
+    fi
+    sums_name="$(printf '%s\n' "${names[@]}" | grep -iE '^sha256sums?(\.txt)?$' | head -n 1 || true)"
+    if [[ -z "${sums_name}" ]]; then
+        warn "${repo} ${tag} has no SHA256SUMS: its packages are not installed"
+        return 0
+    fi
+    # readable by apt's _apt user, which downloads from it
+    mkdir -p "${dir}/${repo//\//_}"
+    chmod 755 "${dir}/${repo//\//_}"
+    sums="${dir}/${repo//\//_}/SHA256SUMS"
+    curl -fsSL --retry 2 -o "${sums}" \
+        "$(jq -r --arg n "${sums_name}" '.assets[] | select(.name == $n) | .browser_download_url' <<< "${json}")"
+    local complete=1
+    for name in "${wanted[@]}"; do
+        file="${dir}/${repo//\//_}/${name}"
+        # not in SHA256SUMS yet: the release is being updated; the next run
+        # takes it (a file that is in it and does not match stops everything)
+        if [[ -z "$(sha_of "${name}" "${sums}")" ]]; then
+            warn "${repo} ${tag}: ${name} is not in its SHA256SUMS yet (being published?): skipped"
+            complete=0
+            continue
+        fi
+        curl -fsSL --retry 2 -o "${file}" \
+            "$(jq -r --arg n "${name}" '.assets[] | select(.name == $n) | .browser_download_url' <<< "${json}")"
+        expected="$(sha_of "${file}" "${sums}")"
+        [[ "$(sha256sum "${file}" | cut -d' ' -f1)" == "${expected}" ]] ||
+            die "${name} does not match the SHA256SUMS of ${repo} ${tag}"
+        package="$(dpkg-deb -f "${file}" Package)"
+        version="$(dpkg-deb -f "${file}" Version)"
+        installed="$(installed_version "${package}")"
+        if [[ -z "${installed}" ]]; then
+            log "${repo} ${tag}${kind}: ${package} ${version} (new)"
+            printf '%s\n' "${file}"
+        elif dpkg --compare-versions "${version}" gt "${installed}"; then
+            log "${repo} ${tag}${kind}: ${package} ${installed} -> ${version}"
+            printf '%s\n' "${file}"
+        else
+            log "${repo} ${tag}${kind}: ${package} ${installed} is up to date"
+        fi
+    done
+    # remembered only when every package was there
+    [[ "${complete}" -eq 0 ]] || printf '%s\n' "${tag}" "${wanted[@]}" > "${dir}/${repo//\//_}/state"
+}
+
+# releases DIR: fetch for every repository of the lists
+releases() {
+    local dir="$1" list repo
+    local -a all=()
+    mapfile -t all < <(lists)
+    for list in "${all[@]}"; do
+        # "REPO [PACKAGE...]"
+        while IFS= read -r repo; do
+            repo="${repo%%#*}"
+            read -r -a fields <<< "${repo}" || true
+            ((${#fields[@]} == 0)) || fetch "${fields[@]:0:1}" "${dir}" "${fields[@]:1}"
+        done < "${list}"
+    done
+}
+
+if [[ -n "${DOWNLOAD_ONLY}" ]]; then
+    mkdir -p "${DOWNLOAD_ONLY}"
+    releases "${DOWNLOAD_ONLY}" > "${DOWNLOAD_ONLY}/packages"
+    cat "${DOWNLOAD_ONLY}/packages"
+    exit 0
+fi
+
+if [[ "${NO_APT}" -eq 0 ]]; then
+    log "the system's packages"
+    "${APT[@]}" update
+    "${APT[@]}" dist-upgrade
+fi
+
+log "Retrobox's packages (GitHub releases)"
+work="$(mktemp -d)"
+trap 'rm -rf "${work}"' EXIT
+chmod 755 "${work}"
+# into a file, not through a pipe: a package that fails its checksum stops here
+releases "${work}" > "${work}/packages"
+mapfile -t debs < "${work}/packages"
+if ((${#debs[@]} > 0)); then
+    # apt, not dpkg: it brings any new dependency they have
+    "${APT[@]}" install "${debs[@]}"
+fi
+# remembered once installed, so the next run does not download them again
+mkdir -p "${STATE_DIR}"
+for state in "${work}"/*/state; do
+    [[ -f "${state}" ]] || continue
+    install -m 644 "${state}" "${STATE_DIR}/$(basename "$(dirname "${state}")")"
+done
+
+if [[ "${NO_APT}" -eq 0 ]]; then
+    log "cleaning up"
+    "${APT[@]}" autoremove --purge
+    "${APT[@]}" clean
+fi
+log "done"

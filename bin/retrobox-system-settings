@@ -5,6 +5,7 @@
 #   retrobox-system-settings timezone get | set ZONE
 #   retrobox-system-settings keyboard get | list-layouts | list-variants LAYOUT | set LAYOUT [VARIANT]
 #   retrobox-system-settings locale get | list | set LANGUAGE
+#   retrobox-system-settings update available | run [--allow-prereleases]
 #
 # This is the program retrobox-core's README asks for ("Console mode and the
 # system's settings"): install.sh points [core] system_settings at it, and
@@ -21,6 +22,13 @@
 # polkit action, in the same rule). A new time zone
 # applies at once; a new keyboard layout or language when the session starts
 # again (it reads them then).
+#
+# update updates the system (the overlay's System page offers it): run
+# runs retrobox-update as root through pkexec (its own polkit action, in the
+# same rule), which hands over to the machine's own updater when it has one
+# (nx-debian's nxd-update), and prints what it does as it goes; available
+# says (exit status 0) whether it can, here: retrobox-update installed where
+# the polkit action expects it, pkexec and apt.
 #
 # A language is a locale's language and territory (es_ES), from the locales
 # the system has (localectl list-locales: on Debian, the ones generated from
@@ -40,6 +48,8 @@ KEYBOARD_FILE="${RETROBOX_KEYBOARD_FILE:-/etc/default/keyboard}"
 LOCALE_DEFAULT="${RETROBOX_LOCALE_DEFAULT:-/etc/default/locale}"
 # where the package and install.sh put retrobox-settings-helper (root's, for pkexec)
 SETTINGS_HELPERS="${RETROBOX_SETTINGS_HELPERS:-/opt/retrobox/libexec/retrobox-settings-helper /usr/local/libexec/retrobox-system-settings/retrobox-settings-helper}"
+# where the package and install.sh put retrobox-update (root's, for pkexec)
+UPDATERS="${RETROBOX_UPDATERS:-/opt/retrobox/bin/retrobox-update /usr/local/libexec/retrobox-system-settings/retrobox-update}"
 LOCALTIME="${RETROBOX_LOCALTIME:-/etc/localtime}"
 LOCALE_FILES="${RETROBOX_LOCALE_FILES:-/etc/default/locale /etc/locale.conf}"
 
@@ -230,6 +240,37 @@ locale_set() {
   change "the language" localectl --no-ask-password set-locale "LANG=${name}"
 }
 
+## Updates --------------------------------------------------------------------
+
+# The installed retrobox-update, or nothing.
+updater() {
+  local path
+  for path in ${UPDATERS}; do
+    if [[ -x "${path}" ]]; then
+      printf '%s\n' "${path}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+update_available() {
+  updater >/dev/null && have pkexec && have apt-get
+}
+
+# Its output as it goes (the overlay shows it); its exit status.
+update_run() {
+  local path status=0
+  path="$(updater)" || fail "cannot update: retrobox-update is not installed (the retrobox-system-settings package, or install.sh)"
+  have pkexec || fail "cannot update: pkexec is not installed"
+  pkexec --disable-internal-agent "${path}" "$@" || status=$?
+  case "${status}" in
+  0) ;;
+  126 | 127) fail "cannot update: not authorized (is the polkit rule of retrobox-polkit-rule in place?)" ;;
+  *) echo "Error: the update failed (status ${status})"; exit "${status}" ;;
+  esac
+}
+
 ## Command line ---------------------------------------------------------------
 
 case "${1:-} ${2:-}" in
@@ -242,6 +283,11 @@ case "${1:-} ${2:-}" in
 "locale get") locale_get ;;
 "locale list") locale_available ;;
 "locale set") [[ $# -eq 3 ]] || usage 2; locale_set "$3" ;;
+"update available") [[ $# -eq 2 ]] || usage 2; update_available ;;
+"update run")
+  [[ $# -eq 2 || ($# -eq 3 && "$3" == --allow-prereleases) ]] || usage 2
+  update_run "${@:3}"
+  ;;
 "-h "* | "--help "*) usage 0 ;;
 *) usage 2 >&2 ;;
 esac
