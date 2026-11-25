@@ -3,7 +3,7 @@
 What turns a machine into a [Retrobox](https://github.com/RetroboxProject/retrobox-core) console, with Retrobox as its only interface, in one of two sessions, plus [the machine's settings](#system-settings-console-mode) that EmulationStation changes in console mode:
 
 - the **labwc** session (Wayland), for **minimal systems** (Debian netinstall, Arch, ...): the machine boots on a TTY, where a systemd service starts [labwc](https://labwc.github.io) and Retrobox runs inside it. No desktop, no display manager, no autologin. Most of this README is about it.
-- the **Openbox** session (X11), for a **display manager** that logs the console's user into it, as nx-debian's image does with lightdm: see [Openbox session](#openbox-session). It used to be *retrobox-labwc*; running `install.sh` again moves an install of it to the new names (`retrobox-session-labwc.service`, `~/.local/share/retrobox-session-labwc`, `~/.config/retrobox-session-labwc`, the polkit rule `50-retrobox-console.rules`), keeping its TTY and on-quit choice; a session still running goes on until the next boot.
+- the **Openbox** session (X11), for a **display manager** that logs the console's user into it, as nx-debian's image does with lightdm: see [Openbox session](#openbox-session). It used to be *retrobox-labwc*; running `install.sh` again moves an install of it to the new names (`retrobox-session-labwc.service`, `~/.local/share/retrobox-session-labwc`, `~/.config/retrobox/session-labwc`, the polkit rule `50-retrobox-console.rules`), keeping its TTY and on-quit choice; a session still running goes on until the next boot.
 
 It is a single installer: it installs no packages, it checks what the system must already have and sets up the rest (your home, plus one service and one polkit rule through `sudo`).
 
@@ -85,7 +85,7 @@ The installer needs root for two files only (it asks for your password through `
 Everything lands in your home:
 
 - `~/.local/share/retrobox-session-labwc`: a copy of this tree (the checkout can go) and `retrobox-session-labwc` linked in `~/.local/bin`
-- `~/.config/retrobox-session-labwc`: labwc's config for the session (`labwc -C`); your `~/.config/labwc` is never touched
+- `~/.config/retrobox/session-labwc`: labwc's config for the session (`labwc -C`), with the rest of Retrobox's configuration (it was `~/.config/retrobox-session-labwc`: `install.sh` moves it); your `~/.config/labwc` is never touched
 - `~/.config/retrobox/retrobox.ini.d/50-labwc.ini`: `[advanced] labwc_tty`, and `[core] system_settings` (see [System settings](#system-settings-console-mode)); Retrobox's console mode is enabled by the session scripts, which pass `--console` to retrobox — it is not a config key
 
 **The TTY is fixed once installed.** To change it: `~/.local/share/retrobox-session-labwc/install.sh --uninstall`, then install again. Running the installer again with the same TTY just updates.
@@ -128,8 +128,8 @@ retrobox-xdp-dns on | off | status
 
 For a machine whose display manager logs the console's user in (no TTY service, no `install.sh`): install `retrobox-session-openbox` and choose its session, `retrobox-openbox` (lightdm: `autologin-session=retrobox-openbox`). `retrobox-openbox-session` then:
 
-1. runs the executables of `/etc/retrobox/session.d/`, then `~/.config/retrobox-openbox/session.d/`, in name order: what the machine's own packages want done at every start (nx-debian puts EmulationStation's defaults for the Switch there). A failing one is logged and skipped.
-2. starts Openbox with the first of `~/.config/retrobox-openbox/rc.xml`, `/etc/retrobox/openbox/rc.xml` and this tree's `share/openbox/rc.xml`, which only takes the volume keys (`retrobox-volume`) and the power key (left to logind) so that EmulationStation never sees them.
+1. runs the executables of `/etc/retrobox/session.d/`, then `~/.config/retrobox/session.d/`, in name order: what the machine's own packages want done at every start (nx-debian puts EmulationStation's defaults for the Switch there). A failing one is logged and skipped.
+2. starts Openbox with the first of `~/.config/retrobox/openbox/rc.xml`, `/etc/retrobox/openbox/rc.xml` and this tree's `share/openbox/rc.xml`, which only takes the volume keys (`retrobox-volume`) and the power key (left to logind) so that EmulationStation never sees them.
 3. once Openbox is up, hides the mouse cursor (batocera's unclutter: the scripts `mouse-hide-x11` and `mouse-show-x11` in `libexec/` show and hide it with Debian's `unclutter-xfixes`), then starts the picom compositor (vsync, the overlay's translucency; no config file, so no shadows nor fades) and Retrobox. picom's backend is `[openbox] compositor` in `retrobox.ini`: `glx` (the default), `xrender`, `egl`, or `none` for no compositor. If Retrobox ends, Openbox stays up. Missing `unclutter-xfixes` is reported and left alone: the console runs with the cursor visible.
 
 Its log is `~/.local/state/retrobox/logs/openbox-session.log`. With no `install.sh`, nothing writes the polkit rule: the machine writes it, with `retrobox-polkit-rule USER > /etc/polkit-1/rules.d/50-retrobox-console.rules` (power off, reboot, time zone, keyboard, language and the settings helper for that user). Retrobox finds `retrobox-system-settings` in `/usr/bin`.
@@ -147,7 +147,7 @@ For the Openbox session (X11), the same roles go through batocera's unclutter (D
 
 ## Headphones
 
-`libexec/retrobox-audio-jack` (started by the session) keeps the audio card on its **analog duplex** profile while headphones are plugged into the jack and on **HDMI** while they are not (analog if there is no HDMI profile available). PipeWire reports the jack but keeps the analog profile available without headphones, so it never leaves it by itself. It reacts to the card events of the audio server (`pactl subscribe`) and needs `pactl`. It only acts when what it wants changes (headphones plugged or unplugged, an HDMI profile becoming available, the session starting): a profile chosen by hand meanwhile, such as from the overlay's audio page or pavucontrol, is left alone until the next change. Other profile names (`pactl list cards` shows them) go in `~/.config/retrobox-session-labwc/environment`:
+`libexec/retrobox-audio-jack` (started by the session) keeps the audio card on its **analog duplex** profile while headphones are plugged into the jack and on **HDMI** while they are not (analog if there is no HDMI profile available). PipeWire reports the jack but keeps the analog profile available without headphones, so it never leaves it by itself. It reacts to the card events of the audio server (`pactl subscribe`) and needs `pactl`. It only acts when what it wants changes (headphones plugged or unplugged, an HDMI profile becoming available, the session starting): a profile chosen by hand meanwhile, such as from the overlay's audio page or pavucontrol, is left alone until the next change. Other profile names (`pactl list cards` shows them) go in `~/.config/retrobox/session-labwc/environment`:
 
 ```
 RETROBOX_AUDIO_HEADPHONES_PROFILE=output:analog-stereo+input:analog-stereo
@@ -168,7 +168,7 @@ internal_output = eDP-1         ; default: the first eDP/LVDS/DSI output
 external_output = HDMI-A-1      ; default: the first other output
 ```
 
-When Retrobox quits normally (exit status 0) the machine powers off; a crash, Win+Shift+E or a restart never do. That is the default of `./install.sh`; `--on-quit shell` just ends the service instead, so the TTY shows its login prompt (the choice lives in `~/.config/retrobox-session-labwc/on_quit`, and a re-run keeps it unless you give the option again).
+When Retrobox quits normally (exit status 0) the machine powers off; a crash, Win+Shift+E or a restart never do. That is the default of `./install.sh`; `--on-quit shell` just ends the service instead, so the TTY shows its login prompt (the choice lives in `~/.config/retrobox/session-labwc/on_quit`, and a re-run keeps it unless you give the option again).
 
 `systemctl poweroff` and `reboot` (also the ones EmulationStation sends) need polkit to allow them. The installer writes `/etc/polkit-1/rules.d/50-retrobox-console.rules`, which lets your user power off and reboot from any session, start, stop and restart `retrobox-session-labwc.service`, and set the system's time zone, keyboard layout and language (on Debian, through `retrobox-settings-helper`) ([System settings](#system-settings-console-mode)) without a password (`--no-polkit` skips it, and then those need `sudo`; `--uninstall` removes it; it needs `polkitd` installed). If a reboot is already in progress when Retrobox exits, the power off does not replace it.
 

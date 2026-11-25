@@ -111,11 +111,11 @@ grep -q '^ExecStopPost=+-/bin/sh -c .*list-jobs.*retrobox-session-labwc.service 
 install_sh --check --tty 8 >/dev/null 2>&1 || fail "check fails after the install"
 [[ -x "${DATA}/install.sh" && -x "${DATA}/bin/retrobox-session-labwc" ]] || fail "tree not copied"
 grep -q 'labwc_tty = 8' "${HOME}/.config/retrobox/retrobox.ini.d/50-labwc.ini" || fail "tty not written"
-grep -q "${DATA}/libexec/retrobox-switch-display" "${HOME}/.config/retrobox-session-labwc/autostart" || fail "autostart not rendered"
-grep -q "<command>foot</command>" "${HOME}/.config/retrobox-session-labwc/rc.xml" || fail "terminal not rendered"
-grep -q "${WORK}/core/bin/retrobox-screenshot" "${HOME}/.config/retrobox-session-labwc/rc.xml" || fail "screenshot not rendered"
-grep -q '@DEFAULT_AUDIO_SOURCE@' "${HOME}/.config/retrobox-session-labwc/rc.xml" || fail "wpctl placeholder was clobbered"
-! grep -q 'go2tty\|exit-tty' "${HOME}/.config/retrobox-session-labwc/rc.xml" || fail "leftovers in rc.xml"
+grep -q "${DATA}/libexec/retrobox-switch-display" "${HOME}/.config/retrobox/session-labwc/autostart" || fail "autostart not rendered"
+grep -q "<command>foot</command>" "${HOME}/.config/retrobox/session-labwc/rc.xml" || fail "terminal not rendered"
+grep -q "${WORK}/core/bin/retrobox-screenshot" "${HOME}/.config/retrobox/session-labwc/rc.xml" || fail "screenshot not rendered"
+grep -q '@DEFAULT_AUDIO_SOURCE@' "${HOME}/.config/retrobox/session-labwc/rc.xml" || fail "wpctl placeholder was clobbered"
+! grep -q 'go2tty\|exit-tty' "${HOME}/.config/retrobox/session-labwc/rc.xml" || fail "leftovers in rc.xml"
 [[ "$(cat "${HOME}/.profile")" == $'# my profile\nexport FOO=1' ]] || fail "the profile was touched"
 RULE="${RETROBOX_POLKIT_DIR}/50-retrobox-console.rules"
 grep -q "subject.user != \"$(id -un)\"" "${RULE}" && grep -q 'login1.reboot' "${RULE}" && grep -q 'login1.power-off' "${RULE}" || fail "polkit rule wrong"
@@ -142,7 +142,7 @@ pass "the TTY cannot change without uninstall; re-install is idempotent"
 
 # --- 5. uninstall undoes the system part and leaves the profile as it was ------------------
 "${DATA}/install.sh" --uninstall >/dev/null 2>&1 || fail "uninstall failed"
-[[ ! -e "${DATA}" && ! -e "${HOME}/.config/retrobox-session-labwc" && ! -e "${HOME}/.config/retrobox/retrobox.ini.d/50-labwc.ini" ]] || fail "files left"
+[[ ! -e "${DATA}" && ! -e "${HOME}/.config/retrobox/session-labwc" && ! -e "${HOME}/.config/retrobox/retrobox.ini.d/50-labwc.ini" ]] || fail "files left"
 [[ "$(cat "${HOME}/.profile")" == $'# my profile\nexport FOO=1' ]] || fail "profile not restored: $(cat "${HOME}/.profile")"
 [[ ! -e "${UNIT}" && ! -e "${STUB_STATE}/enabled-retrobox-session-labwc.service" ]] || fail "service not removed"
 [[ ! -e "${RULE}" ]] || fail "polkit rule not removed"
@@ -178,7 +178,7 @@ install_sh >/dev/null 2>&1 || fail "the move to the new names failed"
 [[ ! -e "${OLD_UNIT}" && ! -e "${OLD_RULE}" && ! -e "${STUB_STATE}/enabled-retrobox-labwc.service" ]] || fail "old service or rule left"
 [[ ! -e "${OLD_DATA}" && ! -e "${HOME}/.config/retrobox-labwc" && ! -L "${HOME}/.local/bin/retrobox-labwc-session" ]] || fail "old copy, config or link left"
 grep -q 'TTYPath=/dev/tty5' "${UNIT}" && [[ -f "${RETROBOX_POLKIT_DIR}/50-retrobox-console.rules" ]] || fail "not installed under the new names on tty5"
-[[ "$(cat "${HOME}/.config/retrobox-session-labwc/on_quit")" == "shell" ]] || fail "the on-quit choice was not kept"
+[[ "$(cat "${HOME}/.config/retrobox/session-labwc/on_quit")" == "shell" ]] || fail "the on-quit choice was not kept"
 grep -qx "system_unit=${UNIT}" "${HOME}/.local/share/retrobox-session-labwc/.install-manifest" && ! grep -q 'retrobox-labwc.service\|50-retrobox-labwc' "${HOME}/.local/share/retrobox-session-labwc/.install-manifest" || fail "manifest still names the old files"
 "${HOME}/.local/share/retrobox-session-labwc/install.sh" --uninstall >/dev/null 2>&1
 [[ ! -e "${UNIT}" && ! -e "${RETROBOX_POLKIT_DIR}/50-retrobox-console.rules" ]] || fail "uninstall after the move left files"
@@ -198,7 +198,7 @@ pass "keyboard layout follows the system file"
 # --- 8. the session: starts labwc + retrobox, passes the keyboard, restarts on request ------
 printf 'XKBLAYOUT="es"\n' >"${RETROBOX_KEYBOARD_FILE}"
 install_sh --tty 8 --on-quit shell >/dev/null 2>&1
-[[ "$(cat "${HOME}/.config/retrobox-session-labwc/on_quit")" == "shell" ]] || fail "--on-quit shell not written"
+[[ "$(cat "${HOME}/.config/retrobox/session-labwc/on_quit")" == "shell" ]] || fail "--on-quit shell not written"
 RUNS="${WORK}/runs"
 : >"${RUNS}"
 # dbus-run-session -- CMD...
@@ -227,7 +227,7 @@ export RETROBOX_LABWC_LOG="${WORK}/session.log"
 "${HOME}/.local/bin/retrobox-session-labwc" -f &
 SESSION=$!
 for _ in $(seq 1 100); do grep -q '^retrobox' "${RUNS}" && break; sleep 0.1; done
-grep -q 'labwc layout=es dir=.*/retrobox-session-labwc' "${RUNS}" || fail "labwc not started with the keyboard and config dir: $(cat "${RUNS}" "${RETROBOX_LABWC_LOG}")"
+grep -q 'labwc layout=es dir=.*/retrobox/session-labwc' "${RUNS}" || fail "labwc not started with the keyboard and config dir: $(cat "${RUNS}" "${RETROBOX_LABWC_LOG}")"
 grep -q 'retrobox display=wayland-test' "${RUNS}" || fail "retrobox did not get labwc's environment"
 grep -q 'args=--console' "${RUNS}" || fail "the session did not start retrobox with --console: $(cat "${RUNS}")"
 printf 'XKBLAYOUT="fr"\n' >"${RETROBOX_KEYBOARD_FILE}"
@@ -303,16 +303,24 @@ cards "available" "${ANALOG}" yes
 cards "not available" "${ANALOG}" yes
 RETROBOX_AUDIO_HDMI_PROFILE=output:hdmi-stereo "${JACK}" --once 2>/dev/null
 [[ "$(cat "${STUB_STATE}/profile-set")" == "alsa_card.pci-0000_00_03.0 output:hdmi-stereo" ]] || fail "RETROBOX_AUDIO_HDMI_PROFILE ignored"
-grep -q 'retrobox-audio-jack' "${HOME}/.config/retrobox-session-labwc/autostart" || fail "audio jack script not in the autostart"
+grep -q 'retrobox-audio-jack' "${HOME}/.config/retrobox/session-labwc/autostart" || fail "audio jack script not in the autostart"
 pass "the audio profile follows the headphone jack: analog duplex with them, HDMI without"
 
 # --- 9. on_quit = poweroff: only a normal quit of retrobox powers off ---------------------
 [[ ! -e "${STUB_STATE}/poweroff" ]] || fail "powered off without being asked"
 printf '#!/bin/sh\nexit 0\n' >"${WORK}/core/bin/retrobox"
 install_sh --tty 8 >/dev/null 2>&1 # a re-run keeps the choice
-[[ "$(cat "${HOME}/.config/retrobox-session-labwc/on_quit")" == "shell" ]] || fail "re-run changed on_quit"
+[[ "$(cat "${HOME}/.config/retrobox/session-labwc/on_quit")" == "shell" ]] || fail "re-run changed on_quit"
+# labwc's config used to be ~/.config/retrobox-session-labwc: a re-run moves it in
+mv "${HOME}/.config/retrobox/session-labwc" "${HOME}/.config/retrobox-session-labwc"
+install_sh --tty 8 >/dev/null 2>&1
+[[ ! -e "${HOME}/.config/retrobox-session-labwc" && "$(cat "${HOME}/.config/retrobox/session-labwc/on_quit")" == "shell" ]] \
+  || fail "the old labwc config dir was not moved into ~/.config/retrobox"
+# only XDG_CONFIG_HOME moves Retrobox's configuration
+[[ "$(RETROBOX_CONFIGDIR=/elsewhere bash -c 'source "$1/libexec/retrobox-common.sh"; retrobox_user_config_dir' _ "${ROOT}")" == "${HOME}/.config/retrobox" ]] \
+  || fail "RETROBOX_CONFIGDIR moved the configuration"
 install_sh --tty 8 --on-quit poweroff >/dev/null 2>&1
-[[ "$(cat "${HOME}/.config/retrobox-session-labwc/on_quit")" == "poweroff" ]] || fail "--on-quit poweroff not written"
+[[ "$(cat "${HOME}/.config/retrobox/session-labwc/on_quit")" == "poweroff" ]] || fail "--on-quit poweroff not written"
 "${HOME}/.local/bin/retrobox-session-labwc" -f || fail "session failed"
 [[ -e "${STUB_STATE}/poweroff" ]] || fail "no poweroff after a normal quit"
 rm -f "${STUB_STATE}/poweroff"
@@ -331,9 +339,9 @@ expect_fail install_sh --on-quit reboot
 install_sh --tty 8 --no-polkit >/dev/null 2>&1 || fail "install --no-polkit failed"
 [[ ! -e "${RULE}" ]] || fail "--no-polkit still wrote the rule"
 pass "--no-polkit skips the rule"
-rm -rf "${HOME}/.config/retrobox-session-labwc" "${HOME}/.local/share/retrobox-session-labwc"
+rm -rf "${HOME}/.config/retrobox/session-labwc" "${HOME}/.local/share/retrobox-session-labwc"
 install_sh --tty 8 >/dev/null 2>&1
-[[ "$(cat "${HOME}/.config/retrobox-session-labwc/on_quit")" == "poweroff" ]] || fail "first install must default to poweroff"
+[[ "$(cat "${HOME}/.config/retrobox/session-labwc/on_quit")" == "poweroff" ]] || fail "first install must default to poweroff"
 pass "the first install powers off on quit by default"
 
 # --- 10. the resolution is the kernel command line's video=, nothing else -----------------
@@ -362,7 +370,7 @@ randr_with() { # randr_with CMDLINE ARG: what wlr-randr was asked to do
 [[ "$(randr_with 'video=1280x720-32@50' mode)" == "--output HDMI-A-2 --mode 1280x720@50Hz" ]] || fail "video= without connector"
 [[ "$(randr_with 'quiet video=HDMI-A-2:1280x720@60' toggle)" == "--output HDMI-A-2 --on --mode 1280x720@60Hz --pos 0,0" ]] || fail "toggle ignores video="
 [[ "$(randr_with 'quiet' toggle)" == "--output HDMI-A-2 --on --preferred --pos 0,0" ]] || fail "no video=: preferred mode expected"
-grep -q 'retrobox-switch-display mode' "${HOME}/.config/retrobox-session-labwc/autostart" || fail "autostart does not apply the mode first"
+grep -q 'retrobox-switch-display mode' "${HOME}/.config/retrobox/session-labwc/autostart" || fail "autostart does not apply the mode first"
 pass "the resolution follows video= on the kernel command line, and only that"
 
 # --- 11. mouse-hide / mouse-show ----------------------------------------------------------
@@ -403,7 +411,7 @@ centre_of() { : >"${WLRCTL_LOG}"; fake_randr "$@"; "${ROOT}/libexec/mouse-show" 
 [[ "$(centre_of 1280x720 1920,0 1.000000 normal)" == "pointer move 2560 360" ]] || fail "position ignored"
 PATH="${WORK}/bare" expect_fail "$(command -v bash)" "${ROOT}/libexec/mouse-hide"
 grep -q 'wlrctl is not installed' "${WORK}/out" || fail "missing wlrctl not reported"
-grep -q 'libexec/mouse-hide' "${HOME}/.config/retrobox-session-labwc/autostart" || fail "autostart does not run mouse-hide"
+grep -q 'libexec/mouse-hide' "${HOME}/.config/retrobox/session-labwc/autostart" || fail "autostart does not run mouse-hide"
 pass "mouse-hide parks the pointer in the corner, mouse-show centres it"
 
 # --- 12. retrobox-system-settings: the system's time zone and keyboard ----------------------
@@ -580,6 +588,16 @@ printf '<openbox_config/>\n' >"${OB}/etc/openbox/rc.xml"
 printf '[openbox]\ncompositor = none\n' >"${OB}/etc/retrobox.ini"
 openbox_session || fail "the Openbox session failed with the machine's rc.xml"
 grep -q "^openbox --config-file ${OB}/etc/openbox/rc.xml " "${OB_LOG}" || fail "the machine's rc.xml not used"
+# the user's: ~/.config/retrobox/openbox/rc.xml and ~/.config/retrobox/session.d
+mkdir -p "${HOME}/.config/retrobox/openbox" "${HOME}/.config/retrobox/session.d" "${HOME}/.config/retrobox-openbox"
+printf '<openbox_config/>\n' >"${HOME}/.config/retrobox/openbox/rc.xml"
+printf '#!/bin/sh\necho "hook user" >>"${OB_LOG}"\n' >"${HOME}/.config/retrobox/session.d/50-user"
+chmod +x "${HOME}/.config/retrobox/session.d/50-user"
+openbox_session || fail "the Openbox session failed with the user's rc.xml"
+grep -q "^openbox --config-file ${HOME}/.config/retrobox/openbox/rc.xml " "${OB_LOG}" || fail "the user's rc.xml not used"
+grep -qx 'hook user' "${OB_LOG}" || fail "the user's session.d not run"
+grep -q 'retrobox-openbox is not read any more' "${HOME}/.local/state/retrobox/logs/openbox-session.log" || fail "the old user dir is not reported"
+rm -rf "${HOME}/.config/retrobox/openbox" "${HOME}/.config/retrobox/session.d" "${HOME}/.config/retrobox-openbox"
 ! grep -q '^picom' "${OB_LOG}" || fail "[openbox] compositor = none still runs picom"
 rm -f "${OB}/etc/retrobox.ini"
 rm -f "${OB}/bin/unclutter-xfixes"

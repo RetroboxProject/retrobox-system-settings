@@ -86,7 +86,7 @@ machine_setting() {
   (
     # shellcheck source=libexec/retrobox-common.sh
     source "${SELF_DIR}/libexec/retrobox-common.sh"
-    RETROBOX_CONFIGDIR=/dev/null get_retrobox_setting "$1" "$2"
+    get_machine_setting "$1" "$2"
   )
 }
 
@@ -148,7 +148,7 @@ if [[ -n "${ROOT_USER}" ]]; then
   }
   HOME="${PASSWD_HOME}"
   export HOME
-  unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_STATE_HOME RETROBOX_CONFIGDIR RETROBOX_LABWC_CONFIG_DIR
+  unset XDG_DATA_HOME XDG_CONFIG_HOME XDG_STATE_HOME RETROBOX_LABWC_CONFIG_DIR
 fi
 # shellcheck source=libexec/retrobox-common.sh
 source "${SELF_DIR}/libexec/retrobox-common.sh"
@@ -162,10 +162,13 @@ readonly DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/retrobox-session-labwc
 # where it all was when the session was retrobox-labwc (migrated by migrate_old_names)
 readonly OLD_DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/retrobox-labwc"
 readonly OLD_CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox-labwc"
+# where labwc's config was before it went into ~/.config/retrobox
+readonly PREV_CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox-session-labwc"
 readonly OLD_UNIT_NAME="retrobox-labwc.service"
 readonly OLD_POLKIT_RULE_NAME="50-retrobox-labwc.rules"
 readonly CONFIG_DIR="${RETROBOX_LABWC_CONFIG_DIR}"
-readonly RETROBOX_CONFIG_DIR="${RETROBOX_CONFIGDIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox}"
+RETROBOX_CONFIG_DIR="$(retrobox_user_config_dir)"
+readonly RETROBOX_CONFIG_DIR
 readonly TTY_DROPIN="${RETROBOX_CONFIG_DIR}/retrobox.ini.d/50-labwc.ini"
 readonly MANIFEST="${DATA_DIR}/.install-manifest"
 readonly BIN_DIR="${HOME}/.local/bin"
@@ -756,6 +759,7 @@ migrate_old_names() {
   mv -- "${OLD_DATA_DIR}" "${DATA_DIR}"
   sed -i '/^system_unit=/d; /^polkit_rule=/d' "${MANIFEST}"
   if [[ -d "${OLD_CONFIG_DIR}" && ! -e "${CONFIG_DIR}" ]]; then
+    mkdir -p -- "$(dirname -- "${CONFIG_DIR}")"
     mv -- "${OLD_CONFIG_DIR}" "${CONFIG_DIR}"
   fi
   if [[ -L "${BIN_DIR}/retrobox-labwc-session" ]]; then
@@ -766,10 +770,24 @@ migrate_old_names() {
   fi
 }
 
+# labwc's config (and the on-quit choice in it) moves into ~/.config/retrobox,
+# where all of Retrobox's configuration is.
+migrate_config_dir() {
+  [[ -d "${PREV_CONFIG_DIR}" && ! -L "${PREV_CONFIG_DIR}" ]] || return 0
+  if [[ -e "${CONFIG_DIR}" ]]; then
+    warn "${PREV_CONFIG_DIR} is not used any more (${CONFIG_DIR} is): remove it by hand."
+    return 0
+  fi
+  info "Moving labwc's config into Retrobox's: ${PREV_CONFIG_DIR} -> ${CONFIG_DIR}"
+  mkdir -p -- "$(dirname -- "${CONFIG_DIR}")"
+  mv -- "${PREV_CONFIG_DIR}" "${CONFIG_DIR}"
+}
+
 do_install() {
   local prev
 
   migrate_old_names
+  migrate_config_dir
 
   # what an earlier run did to the system, kept when this one has nothing to add
   PREV_NOTES="$(grep -E '^(system_unit|polkit_rule|settings_helper|polkit_policy|system_dropin|getty_enabled)=' "${MANIFEST}" 2>/dev/null || true)"

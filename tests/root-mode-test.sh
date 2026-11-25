@@ -96,7 +96,7 @@ RULE="${RETROBOX_POLKIT_DIR}/50-retrobox-console.rules"
 ENABLED="${STUB_STATE}/enabled-retrobox-session-labwc.service"
 # what an install in the home (the user's own install.sh) would create: as root, none of it
 DATA="${HOME_DIR}/.local/share/retrobox-session-labwc"
-CONFIG="${HOME_DIR}/.config/retrobox-session-labwc"
+CONFIG="${HOME_DIR}/.config/retrobox/session-labwc"
 TTY_INI="${HOME_DIR}/.config/retrobox/retrobox.ini.d/50-labwc.ini"
 MACHINE_INI="${RETROBOX_SYSCONFDIR}/retrobox.ini.d/60-session.ini"
 

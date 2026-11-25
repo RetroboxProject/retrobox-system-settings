@@ -29,8 +29,10 @@ RETROBOX_LABWC_COMMON_SOURCED=1
 RETROBOX_LABWC_DIR="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." &>/dev/null && pwd -P)"
 
 # labwc's own configuration directory for the gaming session (labwc -C):
-# kept apart from ~/.config/labwc so it never touches a labwc setup of yours.
-RETROBOX_LABWC_CONFIG_DIR="${RETROBOX_LABWC_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox-session-labwc}"
+# kept apart from ~/.config/labwc so it never touches a labwc setup of yours,
+# and in Retrobox's configuration, like the rest of it. (The machine's service
+# renders it in its runtime directory instead, and says so in this variable.)
+RETROBOX_LABWC_CONFIG_DIR="${RETROBOX_LABWC_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox/session-labwc}"
 
 # Where the system keyboard is configured (keyboard-configuration on Debian).
 RETROBOX_KEYBOARD_FILE="${RETROBOX_KEYBOARD_FILE:-/etc/default/keyboard}"
@@ -51,13 +53,26 @@ find_retrobox_root() {
   printf '%s\n' "${candidate}"
 }
 
-# Prints the retrobox.ini files, lowest priority first.
+# Retrobox's configuration directories, as retrobox-core resolves them: the
+# system's (/etc/retrobox; RETROBOX_SYSCONFDIR for the tests) and the user's
+# ($XDG_CONFIG_HOME/retrobox, else ~/.config/retrobox: nothing else moves it).
+retrobox_system_config_dir() {
+  printf '%s\n' "${RETROBOX_SYSCONFDIR:-/etc/retrobox}"
+}
+retrobox_user_config_dir() {
+  local base="${XDG_CONFIG_HOME:-}"
+  [[ "${base}" == /* ]] || base="${HOME}/.config"
+  printf '%s\n' "${base}/retrobox"
+}
+
+# Prints the retrobox.ini files, lowest priority first; with "system", only
+# the machine's (/etc/retrobox and its retrobox.ini.d, never a home).
 retrobox_ini_files() {
-  local sysconf="${RETROBOX_SYSCONFDIR:-/etc/retrobox}"
-  local config="${RETROBOX_CONFIGDIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox}"
+  local -a layers=("$(retrobox_system_config_dir)")
   local layer dropin
 
-  for layer in "${sysconf}" "${config}"; do
+  [[ "${1:-}" == system ]] || layers+=("$(retrobox_user_config_dir)")
+  for layer in "${layers[@]}"; do
     [[ -r "${layer}/retrobox.ini" ]] && printf '%s\n' "${layer}/retrobox.ini"
     for dropin in "${layer}"/retrobox.ini.d/*.ini; do
       [[ -r "${dropin}" ]] && printf '%s\n' "${dropin}"
@@ -103,6 +118,7 @@ read_ini_value() {
 get_retrobox_setting() {
   local section="$1"
   local key="$2"
+  local scope="${3:-}"
   local file value result="" found=1
 
   while IFS= read -r file; do
@@ -110,10 +126,16 @@ get_retrobox_setting() {
       result="${value}"
       found=0
     fi
-  done < <(retrobox_ini_files)
+  done < <(retrobox_ini_files "${scope}")
 
   ((found == 0)) || return 1
   printf '%s\n' "${result}"
+}
+
+# The same, from the machine's retrobox.ini only (what a home holds must not
+# outrank the word of the machine).
+get_machine_setting() {
+  get_retrobox_setting "$1" "$2" system
 }
 
 # True if $1 is a valid VT number (1-12).

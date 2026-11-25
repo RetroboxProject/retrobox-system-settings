@@ -7,11 +7,12 @@
 # order (the system's first, then the user's): what the machine's own
 # packages want done at every start, such as defaults for EmulationStation.
 #   /etc/retrobox/session.d/
-#   ~/.config/retrobox-openbox/session.d/
-# A failing one is reported and skipped.
+#   ~/.config/retrobox/session.d/
+# A failing one is reported and skipped. Like all of Retrobox's configuration,
+# the machine's is in /etc/retrobox and the user's in $XDG_CONFIG_HOME/retrobox.
 #
 # Openbox's rc.xml is the first of:
-#   ~/.config/retrobox-openbox/rc.xml        the user's
+#   ~/.config/retrobox/openbox/rc.xml        the user's
 #   /etc/retrobox/openbox/rc.xml             the machine's
 #   share/openbox/rc.xml                      this tree's (volume and power keys),
 #                                             with @LIBEXEC@ filled in
@@ -21,12 +22,17 @@ set -euo pipefail
 
 SELF_DIR="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd -P)"
 SYSCONF="${RETROBOX_SYSCONFDIR:-/etc/retrobox}"
-USER_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/retrobox-openbox"
+USER_BASE="${XDG_CONFIG_HOME:-}"
+[[ "${USER_BASE}" == /* ]] || USER_BASE="${HOME}/.config"
+USER_DIR="${USER_BASE}/retrobox"
 STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/retrobox/logs"
 
 mkdir -p -- "${STATE_DIR}"
 exec >>"${STATE_DIR}/openbox-session.log" 2>&1
 echo "--- $(date -Iseconds) retrobox-openbox-session"
+if [[ -d "${USER_BASE}/retrobox-openbox" ]]; then
+  echo "${USER_BASE}/retrobox-openbox is not read any more: its session.d and rc.xml go in ${USER_DIR} (session.d/, openbox/rc.xml)"
+fi
 
 for dir in "${SYSCONF}/session.d" "${USER_DIR}/session.d"; do
   [[ -d "${dir}" ]] || continue
@@ -37,7 +43,7 @@ for dir in "${SYSCONF}/session.d" "${USER_DIR}/session.d"; do
   done
 done
 
-rc="${USER_DIR}/rc.xml"
+rc="${USER_DIR}/openbox/rc.xml"
 [[ -f "${rc}" ]] || rc="${SYSCONF}/openbox/rc.xml"
 if [[ ! -f "${rc}" ]]; then
   # this tree's, with its own path filled in (@LIBEXEC@)

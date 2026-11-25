@@ -35,7 +35,7 @@ die() {
 
 # machine_setting SECTION KEY: a value of the machine's own retrobox.ini.
 machine_setting() {
-  RETROBOX_CONFIGDIR=/dev/null get_retrobox_setting "$1" "$2"
+  get_machine_setting "$1" "$2"
 }
 
 # Escapes a string for the replacement side of a sed s||| expression.
