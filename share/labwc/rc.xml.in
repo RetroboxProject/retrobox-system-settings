@@ -69,4 +69,16 @@
     <repeatRate>25</repeatRate>
     <repeatDelay>600</repeatDelay>
   </keyboard>
+  <!-- A console shows the window it has just opened: every new window comes
+       to the front, with the focus. EmulationStation stays fullscreen (and
+       black) while it runs a game or an app, and gets the focus back when
+       something closes before that window opens, such as the overlay's
+       install screen: without this, Kodi or a game started after installing
+       it could open under EmulationStation's black window. -->
+  <windowRules>
+    <windowRule identifier="*">
+      <action name="Raise"/>
+      <action name="Focus"/>
+    </windowRule>
+  </windowRules>
 </labwc_config>

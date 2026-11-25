@@ -85,7 +85,7 @@ The installer needs root for two files only (it asks for your password through `
 Everything lands in your home:
 
 - `~/.local/share/retrobox-session-labwc`: a copy of this tree (the checkout can go) and `retrobox-session-labwc` linked in `~/.local/bin`
-- `~/.config/retrobox/session-labwc`: labwc's config for the session (`labwc -C`), with the rest of Retrobox's configuration (it was `~/.config/retrobox-session-labwc`: `install.sh` moves it); your `~/.config/labwc` is never touched
+- `~/.config/retrobox/session-labwc`: labwc's config for the session (`labwc -C`: its keys, and every new window brought to the front with the focus, so that a game or Kodi opened right after the overlay's install screen never ends up under EmulationStation), with the rest of Retrobox's configuration (it was `~/.config/retrobox-session-labwc`: `install.sh` moves it); your `~/.config/labwc` is never touched
 - `~/.config/retrobox/retrobox.ini.d/50-labwc.ini`: `[advanced] labwc_tty`, and `[core] system_settings` (see [System settings](#system-settings-console-mode)); Retrobox's console mode is enabled by the session scripts, which pass `--console` to retrobox — it is not a config key
 
 **The TTY is fixed once installed.** To change it: `~/.local/share/retrobox-session-labwc/install.sh --uninstall`, then install again. Running the installer again with the same TTY just updates.

@@ -116,6 +116,8 @@ grep -q "<command>foot</command>" "${HOME}/.config/retrobox/session-labwc/rc.xml
 grep -q "${WORK}/core/bin/retrobox-screenshot" "${HOME}/.config/retrobox/session-labwc/rc.xml" || fail "screenshot not rendered"
 grep -q '@DEFAULT_AUDIO_SOURCE@' "${HOME}/.config/retrobox/session-labwc/rc.xml" || fail "wpctl placeholder was clobbered"
 ! grep -q 'go2tty\|exit-tty' "${HOME}/.config/retrobox/session-labwc/rc.xml" || fail "leftovers in rc.xml"
+grep -q '<windowRule identifier="\*">' "${HOME}/.config/retrobox/session-labwc/rc.xml" || fail "new windows are not brought to the front"
+python3 -c 'import sys, xml.dom.minidom as m; m.parse(sys.argv[1])' "${HOME}/.config/retrobox/session-labwc/rc.xml" || fail "rc.xml is not valid XML"
 [[ "$(cat "${HOME}/.profile")" == $'# my profile\nexport FOO=1' ]] || fail "the profile was touched"
 RULE="${RETROBOX_POLKIT_DIR}/50-retrobox-console.rules"
 grep -q "subject.user != \"$(id -un)\"" "${RULE}" && grep -q 'login1.reboot' "${RULE}" && grep -q 'login1.power-off' "${RULE}" || fail "polkit rule wrong"
