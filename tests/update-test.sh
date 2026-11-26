@@ -13,6 +13,17 @@ for tool in curl jq dpkg-deb python3 apt-get; do
   command -v "${tool}" >/dev/null 2>&1 || { echo "skipped: no ${tool}"; exit 0; }
 done
 
+# retrobox-update runs itself through sudo when it is not root, and sudo drops
+# the environment that points it at the fake GitHub API: it would update the
+# real system. So the whole test runs as root, with the caller's PATH.
+if [[ "${EUID}" -ne 0 ]]; then
+  if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    exec sudo -n env "PATH=${PATH}" "${BASH_SOURCE[0]}" "$@"
+  fi
+  echo "skipped: needs root, or sudo without a password"
+  exit 0
+fi
+
 fail() {
   echo "UPDATE TEST FAILED: $*" >&2
   exit 1
