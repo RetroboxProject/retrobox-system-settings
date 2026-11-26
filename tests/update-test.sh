@@ -111,11 +111,18 @@ run_update --allow-prereleases 2>/dev/null || fail "hand-over failed"
 rm -f "${WORK}/own.log"
 out="$(run_update --no-apt --download-only "${WORK}/dl4" 2>/dev/null)" || true
 [[ ! -e "${WORK}/own.log" ]] || fail "--no-apt handed over too"
+# apt is a stub here: only that the hand-over does not happen is of interest
+mkdir -p "${WORK}/aptstub"
+printf '#!/bin/sh\necho "apt $*" >>"%s/apt.log"\n' "${WORK}" >"${WORK}/aptstub/apt-get"
+chmod +x "${WORK}/aptstub/apt-get"
+PATH="${WORK}/aptstub:${PATH}" RETROBOX_UPDATE_NO_HANDOVER=1 run_update 2>"${WORK}/log5" || true
+[[ ! -e "${WORK}/own.log" ]] || fail "RETROBOX_UPDATE_NO_HANDOVER handed over"
+grep -q "the system's packages" "${WORK}/log5" || fail "it did not update by itself: $(cat "${WORK}/log5")"
 printf '[advanced]\nsystem_updater = relative/path\n' >"${SYSCONF}/retrobox.ini.d/50-machine.ini"
 run_update 2>"${WORK}/log4" && fail "a bad system_updater was run"
 grep -q 'is not an executable' "${WORK}/log4" || fail "bad system_updater not said: $(cat "${WORK}/log4")"
 rm -rf "${SYSCONF}/retrobox.ini.d"
-pass "the machine's own updater ([advanced] system_updater) takes over, but not with --no-apt"
+pass "the machine's own updater ([advanced] system_updater) takes over, but not with --no-apt or RETROBOX_UPDATE_NO_HANDOVER"
 
 # --- 5. retrobox-system-settings update -------------------------------------------------------
 STUBS="${WORK}/stubs"

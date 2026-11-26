@@ -18,12 +18,14 @@
 #      (When Retrobox has an apt repository, step 1 will do this.)
 #   3. apt-get autoremove --purge and apt-get clean.
 #
-# A machine with an updater of its own that updates Retrobox too ([advanced]
-# system_updater of the machine's retrobox.ini: nx-debian's nxd-update, which
-# also updates the Switch's own packages and then runs retrobox-update
-# --no-apt) gets that one instead: retrobox-update hands over to it.
+# A machine with an updater of its own that is retrobox-update plus what only
+# that machine has ([advanced] system_updater of the machine's retrobox.ini:
+# nx-debian's nxd-update, which runs retrobox-update and then updates the
+# Switch's own packages) gets that one instead: retrobox-update hands over to
+# it, unless RETROBOX_UPDATE_NO_HANDOVER is set, which is how that updater
+# runs this one without coming back to itself.
 #
-# --no-apt only does step 2 (for such an updater, which does the rest);
+# --no-apt only does step 2;
 # --no-recommends installs no Recommends (a system built without them).
 # Only releases GitHub does not mark as pre-releases are used, unless
 # --allow-prereleases. --download-only DIR stops after downloading and
@@ -117,7 +119,7 @@ if [[ -z "${DOWNLOAD_ONLY}" && "${EUID}" -ne 0 ]]; then
     exec sudo -- "${SELF}" --escalated "${ARGS[@]}"
 fi
 
-if [[ "${NO_APT}" -eq 0 && -z "${DOWNLOAD_ONLY}" ]]; then
+if [[ "${NO_APT}" -eq 0 && -z "${DOWNLOAD_ONLY}" && -z "${RETROBOX_UPDATE_NO_HANDOVER:-}" ]]; then
     updater="$(machine_updater)"
     if [[ -n "${updater}" ]]; then
         [[ "${updater}" == /* && -x "${updater}" ]] ||
