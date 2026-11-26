@@ -30,7 +30,12 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
-          shellcheck -x -S style install.sh bin/* libexec/* tests/*.sh packaging/*.sh
+          # the files that are not shell (mouse-cursor-x11 is Python) go to pylint
+          shellcheck -x -S style install.sh $(grep -L '^#!.*python' bin/* libexec/* tests/*.sh packaging/*.sh)
+      - name: pylint
+        run: |
+          sudo apt-get install -y -qq pylint
+          pylint $(grep -l '^#!.*python' bin/* libexec/*)
 
       - name: Smoke test
         run: tests/smoke-test.sh
