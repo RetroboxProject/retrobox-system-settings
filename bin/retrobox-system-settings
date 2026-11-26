@@ -25,8 +25,7 @@
 #
 # update updates the system (the overlay's System page offers it): run
 # runs retrobox-update as root through pkexec (its own polkit action, in the
-# same rule), which hands over to the machine's own updater when it has one
-# (nx-debian's nxd-update), and prints what it does as it goes; available
+# same rule), and prints what it does as it goes; available
 # says (exit status 0) whether it can, here: retrobox-update installed where
 # the polkit action expects it, pkexec and apt.
 #

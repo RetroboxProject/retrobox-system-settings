@@ -18,13 +18,6 @@
 #      (When Retrobox has an apt repository, step 1 will do this.)
 #   3. apt-get autoremove --purge and apt-get clean.
 #
-# A machine with an updater of its own that is retrobox-update plus what only
-# that machine has ([advanced] system_updater of the machine's retrobox.ini:
-# nx-debian's nxd-update, which runs retrobox-update and then updates the
-# Switch's own packages) gets that one instead: retrobox-update hands over to
-# it, unless RETROBOX_UPDATE_NO_HANDOVER is set, which is how that updater
-# runs this one without coming back to itself.
-#
 # --no-apt only does step 2;
 # --no-recommends installs no Recommends (a system built without them).
 # Only releases GitHub does not mark as pre-releases are used, unless
@@ -89,27 +82,8 @@ if ! command -v dpkg > /dev/null 2>&1 || ! command -v apt-get > /dev/null 2>&1; 
     die "this system has no apt: update it with its own updater"
 fi
 
-# The machine's own updater runs as it is: it gets root itself.
-# machine_updater: the machine's own updater ([advanced] system_updater of
-# /etc/retrobox/retrobox.ini and its retrobox.ini.d, never a home's)
-machine_updater() {
-    local file value=""
-    for file in "${SYSCONF}/retrobox.ini" "${SYSCONF}"/retrobox.ini.d/*.ini; do
-        [[ -r "${file}" ]] || continue
-        value="$(awk '
-            /^[[:space:]]*[#;]/ { next }
-            /^[[:space:]]*\[/ { inside = ($0 ~ /^[[:space:]]*\[[[:space:]]*advanced[[:space:]]*\]/); next }
-            inside && /^[[:space:]]*system_updater[[:space:]]*=/ {
-                sub(/^[^=]*=[[:space:]]*/, ""); sub(/[[:space:]]+$/, ""); found = $0
-            }
-            END { if (found != "") print found }' "${file}")" || true
-        [[ -z "${value}" ]] || printf '%s\n' "${value}"
-    done | tail -n 1
-}
-
-# root first, then the machine's own updater below runs as root too (so it never
-# asks for a password itself): sudo runs this very file, which a rule of sudoers
-# may allow without one. --download-only never goes through sudo, nor is it
+# root first: sudo runs this very file, which a rule of sudoers may allow
+# without a password. --download-only never goes through sudo, nor is it
 # accepted from it (it writes wherever it is told).
 if [[ -n "${DOWNLOAD_ONLY}" && -n "${SUDO_USER:-}" ]]; then
     die "--download-only does not run as root through sudo"
@@ -117,19 +91,6 @@ fi
 if [[ -z "${DOWNLOAD_ONLY}" && "${EUID}" -ne 0 ]]; then
     [[ "${ESCALATED}" -eq 0 ]] || die "it needs root"
     exec sudo -- "${SELF}" --escalated "${ARGS[@]}"
-fi
-
-if [[ "${NO_APT}" -eq 0 && -z "${DOWNLOAD_ONLY}" && -z "${RETROBOX_UPDATE_NO_HANDOVER:-}" ]]; then
-    updater="$(machine_updater)"
-    if [[ -n "${updater}" ]]; then
-        [[ "${updater}" == /* && -x "${updater}" ]] ||
-            die "[advanced] system_updater of ${SYSCONF}/retrobox.ini is not an executable: ${updater}"
-        [[ "$(readlink -f -- "${updater}")" != "${SELF}" ]] || die "[advanced] system_updater is retrobox-update itself"
-        log "this machine has its own updater: ${updater}"
-        flags=()
-        [[ "${PRERELEASES}" -eq 0 ]] || flags+=(--allow-prereleases)
-        exec "${updater}" "${flags[@]}"
-    fi
 fi
 
 if [[ -z "${DOWNLOAD_ONLY}" && -z "${RETROBOX_UPDATE_INHIBITED:-}" && -d /run/systemd/system ]] &&

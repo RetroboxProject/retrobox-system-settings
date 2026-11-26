@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Test of retrobox-update against a fake GitHub API served over http on
 # localhost (which packages it takes, the lists of /etc/retrobox/releases.d,
-# checksums), the hand-over to the machine's own updater, and
-# retrobox-system-settings update with a stand-in pkexec.
+# checksums), and retrobox-system-settings update with a stand-in pkexec.
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -112,33 +111,7 @@ fi
 grep -q 'does not match the SHA256SUMS' "${WORK}/log3" || fail "mismatch not said: $(cat "${WORK}/log3")"
 pass "a package that does not match its release's SHA256SUMS stops the update"
 
-# --- 4. the machine's own updater takes over (not with --no-apt) --------------------------
-mkdir -p "${SYSCONF}/retrobox.ini.d"
-cat >"${WORK}/own-updater" <<SH
-#!/bin/sh
-echo "own \$*" >"${WORK}/own.log"
-SH
-chmod +x "${WORK}/own-updater"
-printf '[advanced]\nsystem_updater = %s\n' "${WORK}/own-updater" >"${SYSCONF}/retrobox.ini.d/50-machine.ini"
-run_update --allow-prereleases 2>/dev/null || fail "hand-over failed"
-[[ "$(cat "${WORK}/own.log")" == "own --allow-prereleases" ]] || fail "own updater: $(cat "${WORK}/own.log" 2>/dev/null)"
-rm -f "${WORK}/own.log"
-out="$(run_update --no-apt --download-only "${WORK}/dl4" 2>/dev/null)" || true
-[[ ! -e "${WORK}/own.log" ]] || fail "--no-apt handed over too"
-# apt is a stub here: only that the hand-over does not happen is of interest
-mkdir -p "${WORK}/aptstub"
-printf '#!/bin/sh\necho "apt $*" >>"%s/apt.log"\n' "${WORK}" >"${WORK}/aptstub/apt-get"
-chmod +x "${WORK}/aptstub/apt-get"
-PATH="${WORK}/aptstub:${PATH}" RETROBOX_UPDATE_NO_HANDOVER=1 run_update 2>"${WORK}/log5" || true
-[[ ! -e "${WORK}/own.log" ]] || fail "RETROBOX_UPDATE_NO_HANDOVER handed over"
-grep -q "the system's packages" "${WORK}/log5" || fail "it did not update by itself: $(cat "${WORK}/log5")"
-printf '[advanced]\nsystem_updater = relative/path\n' >"${SYSCONF}/retrobox.ini.d/50-machine.ini"
-run_update 2>"${WORK}/log4" && fail "a bad system_updater was run"
-grep -q 'is not an executable' "${WORK}/log4" || fail "bad system_updater not said: $(cat "${WORK}/log4")"
-rm -rf "${SYSCONF}/retrobox.ini.d"
-pass "the machine's own updater ([advanced] system_updater) takes over, but not with --no-apt or RETROBOX_UPDATE_NO_HANDOVER"
-
-# --- 5. retrobox-system-settings update -------------------------------------------------------
+# --- 4. retrobox-system-settings update -------------------------------------------------------
 STUBS="${WORK}/stubs"
 mkdir -p "${STUBS}"
 cat >"${STUBS}/pkexec" <<SH
