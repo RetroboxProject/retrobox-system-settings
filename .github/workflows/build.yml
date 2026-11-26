@@ -1,10 +1,15 @@
 name: build
 
-# Releases, by hand only (github-release-dispatch triggers it): checks, then
-# builds the Debian packages with the version given (v0.3 -> 0.3) and
-# publishes them as a GitHub Release of that tag. Without a version it only
-# builds them (an artifact), to try the packages of a commit.
+# Checks and builds the Debian packages.
+# - Push to main: publishes the rolling "continuous" pre-release, versioned
+#   X.Y.Z.<UTC timestamp> (above the last release, below the next one), so it
+#   installs over the previous build.
+# - Manual run with a version (vX.Y or vX.Y.Z): publishes that release.
+# - Pull requests, or a manual run without a version: only build and test.
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
     inputs:
       version:
@@ -18,53 +23,98 @@ on:
         default: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
       - name: shellcheck
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
           # the files that are not shell (mouse-cursor-x11 is Python) go to pylint
-          shellcheck -x -S style install.sh $(grep -L '^#!.*python' bin/* libexec/* tests/*.sh packaging/*.sh)
+          shellcheck -x -S style install.sh .github/scripts/*.sh \
+            $(grep -L '^#!.*python' bin/* libexec/* tests/*.sh packaging/*.sh)
       - name: pylint
         run: |
           sudo apt-get install -y -qq pylint
           pylint $(grep -l '^#!.*python' bin/* libexec/*)
 
+      - name: Tests of the release scripts
+        run: .github/scripts/ci-scripts-test.sh
       - name: Smoke test
         run: tests/smoke-test.sh
-
-      - name: Build the packages
-        env:
-          VERSION: ${{ inputs.version }}
+      - name: Root-mode test (the package's setup)
+        run: sudo tests/root-mode-test.sh
+      - name: Update test (retrobox-update, fake GitHub API)
         run: |
-          if [[ -n "${VERSION}" && ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
-            echo "version must be vX.Y or vX.Y.Z, not ${VERSION}" >&2
-            exit 1
-          fi
-          packaging/build-deb.sh "${VERSION:-0.0.0~${GITHUB_SHA::7}}" dist
-          for deb in dist/*.deb; do dpkg-deb --info "${deb}"; done
-          (cd dist && sha256sum ./*.deb > SHA256SUMS)
+          sudo apt-get install -y -qq jq
+          tests/update-test.sh
 
-      - name: Upload the packages
-        uses: actions/upload-artifact@v4
+      - name: Choose the version
+        id: version
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          if [[ -n "${REQUESTED}" ]]; then
+            [[ "${REQUESTED}" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] \
+              || { echo "bad version: ${REQUESTED}" >&2; exit 1; }
+            version="${REQUESTED#v}"
+          elif [[ "${GITHUB_EVENT_NAME}" == push ]]; then
+            version="$(.github/scripts/continuous-version.sh .)"
+          else
+            version="0.0.0"
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "Version: ${version}"
+
+      - name: Build the .deb
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          packaging/build-deb.sh "${VERSION}" dist
+          for deb in dist/*.deb; do dpkg-deb --info "${deb}"; done
+
+      - uses: actions/upload-artifact@v4
         with:
           name: retrobox-system-settings-debs
-          path: dist/*
+          path: dist/*.deb
 
+  publish:
+    if: github.event_name == 'push' || inputs.version != ''
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/download-artifact@v4
+        with: { name: retrobox-system-settings-debs, path: dist }
+      # Both modes regenerate SHA256SUMS (bare names), which retrobox-update
+      # and the installer verify.
+      - name: Publish the continuous pre-release
+        if: inputs.version == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: .github/scripts/publish-release.sh continuous dist "${VERSION}"
       - name: Publish the release
         if: inputs.version != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
-          PRERELEASE: ${{ inputs.prerelease }}
-        run: |
-          flags=(--target "${GITHUB_SHA}" --title "${VERSION}" --generate-notes)
-          [[ "${PRERELEASE}" == "true" ]] && flags+=(--prerelease)
-          gh release create "${VERSION}" "${flags[@]}" dist/*.deb dist/SHA256SUMS
+          TAG: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease && '--prerelease' || '' }}
+        # PRERELEASE is intentionally unquoted: empty means no argument.
+        # shellcheck disable=SC2086
+        run: .github/scripts/publish-release.sh tag "${TAG}" dist ${PRERELEASE}
