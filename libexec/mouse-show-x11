@@ -1,16 +1,9 @@
 #!/usr/bin/env bash
-# Shows the X11 cursor (the Retrobox Openbox session; a clone of batocera's
-# unclutter). Standalone: copy it anywhere (e.g. a retrobox retrohook), it
-# needs only unclutter-xfixes — which hides the cursor — so killing it lets
-# the cursor back. If unclutter is not running, the cursor is visible anyway.
+# Shows the X11 cursor (the Retrobox Openbox session): the opposite of
+# mouse-hide-x11, which has to be next to it as well as mouse-cursor-x11.
+# Showing it when it is not hidden does nothing.
 #
 # Usage: mouse-show-x11
 set -euo pipefail
 
-# Kill the running unclutter-xfixes (one if several): the X server undoes
-# the hide of a client that dies, so the cursor comes back.
-if command -v pkill >/dev/null 2>&1; then
-  pkill -x unclutter-xfixes 2>/dev/null || true
-elif command -v pgrep >/dev/null 2>&1; then
-  for pid in $(pgrep -x unclutter-xfixes 2>/dev/null); do kill "${pid}" 2>/dev/null || true; done
-fi
+exec "${RETROBOX_MOUSE_CURSOR_X11:-$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/mouse-cursor-x11}" show

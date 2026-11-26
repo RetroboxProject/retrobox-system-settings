@@ -142,7 +142,7 @@ For a machine whose display manager logs the console's user in (no TTY service, 
 
 1. runs the executables of `/etc/retrobox/session.d/`, then `~/.config/retrobox/session.d/`, in name order: what the machine's own packages want done at every start (nx-debian puts EmulationStation's defaults for the Switch there). A failing one is logged and skipped.
 2. starts Openbox with the first of `~/.config/retrobox/openbox/rc.xml`, `/etc/retrobox/openbox/rc.xml` and this tree's `share/openbox/rc.xml`, which only takes the volume keys (`retrobox-volume`) and the power key (left to logind) so that EmulationStation never sees them.
-3. once Openbox is up, hides the mouse cursor (batocera's unclutter: the scripts `mouse-hide-x11` and `mouse-show-x11` in `libexec/` show and hide it with Debian's `unclutter-xfixes`), then starts the picom compositor (vsync, the overlay's translucency; no config file, so no shadows nor fades) and Retrobox. picom's backend is `[openbox] compositor` in `retrobox.ini`: `glx` (the default), `xrender`, `egl`, or `none` for no compositor. If Retrobox ends, Openbox stays up. Missing `unclutter-xfixes` is reported and left alone: the console runs with the cursor visible.
+3. once Openbox is up, hides the mouse cursor (the scripts `mouse-hide-x11` and `mouse-show-x11` in `libexec/` hide and show it, through `mouse-cursor-x11`), then starts the picom compositor (vsync, the overlay's translucency; no config file, so no shadows nor fades) and Retrobox. picom's backend is `[openbox] compositor` in `retrobox.ini`: `glx` (the default), `xrender`, `egl`, or `none` for no compositor. If Retrobox ends, Openbox stays up. Missing `unclutter-xfixes` is reported and left alone: the console runs with the cursor visible.
 
 Its log is `~/.local/state/retrobox/logs/openbox-session.log`. With no `install.sh`, nothing writes the polkit rule: the machine writes it, with `retrobox-polkit-rule USER > /etc/polkit-1/rules.d/50-retrobox-console.rules` (power off, reboot, time zone, keyboard, language, the settings helper and the system update for that user). Retrobox finds `retrobox-system-settings` in `/usr/bin`.
 
@@ -155,7 +155,7 @@ Two small standalone scripts in `libexec/` (they need only `wlrctl`, and `wlr-ra
 
 `wlrctl` can only move the pointer relatively, so `mouse-hide` sends it far past the corner (the compositor stops it at the edge) and `mouse-show` goes to the top-left corner and then back half the size of the screen, which it reads from `wlr-randr`.
 
-For the Openbox session (X11), the same roles go through batocera's unclutter (Debian's `unclutter-xfixes`, the XFixes-based rewrite: there is no `unclutter-remote`): `mouse-hide-x11` kills a running `unclutter-xfixes` and starts a fresh one hidden at once (`--start-hidden --fork`), `mouse-show-x11` kills it (the X server undoes the hide of the client that died, so the cursor comes back); the session runs the hide when it starts. Both need only `unclutter-xfixes`; `mouse-show-x11` also runs with it absent (the cursor is visible then anyway).
+For the Openbox session (X11), `mouse-hide-x11` and `mouse-show-x11` do the same, through `mouse-cursor-x11` (python3 and libXfixes, which every X session has; copy the three together). The X server hides the cursor, with XFixes, for as long as the client that asked stays connected, whatever the pointer does, so a tap on a touchscreen or a mouse that moves does not bring it back: `hide` leaves a small process holding that, `show` ends it, and the cursor is back. unclutter, which this replaces, shows the cursor again on every motion and, after a tap on the touchscreen, for its timeout. `mouse-cursor-x11 status` says which it is; the session hides it at start.
 
 ## Headphones
 
@@ -193,7 +193,7 @@ The session log is `~/.local/state/retrobox/logs/labwc-session.log`; the service
 ```
 install.sh    the installer: --check, install, --uninstall
 bin/          retrobox-session-labwc, retrobox-openbox-session, retrobox-system-settings, retrobox-xdp-dns
-libexec/      display switcher, audio jack, mouse-hide, mouse-show, mouse-hide-x11, mouse-show-x11,
+libexec/      display switcher, audio jack, mouse-hide, mouse-show, mouse-hide-x11, mouse-show-x11, mouse-cursor-x11,
               retrobox-common.sh (settings, keyboard), retrobox-openbox-autostart,
               retrobox-polkit-rule, retrobox-settings-helper, retrobox-volume
 share/        labwc config templates, Openbox's rc.xml, the xsession entry, the polkit action

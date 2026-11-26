@@ -1,24 +1,10 @@
 #!/usr/bin/env bash
-# Hides the X11 cursor (the Retrobox Openbox session; a clone of batocera's
-# unclutter). Standalone: copy it anywhere (e.g. a retrobox retrohook), it
-# needs only unclutter-xfixes (Debian's package for unclutter; there is no
-# unclutter-remote, so it is controlled by restarting it hidden).
+# Hides the X11 cursor (the Retrobox Openbox session) until mouse-show-x11:
+# a tap on a touchscreen or a moving mouse does not bring it back (see
+# mouse-cursor-x11 for how). Standalone: copy it anywhere (e.g. a retrobox
+# retrohook) together with mouse-cursor-x11, which does the work.
 #
 # Usage: mouse-hide-x11
 set -euo pipefail
 
-if ! command -v unclutter-xfixes >/dev/null 2>&1; then
-  echo "mouse-hide-x11: unclutter is not installed (apt install unclutter-xfixes)" >&2
-  exit 1
-fi
-
-# A stale instance would show the cursor on motion: kill it. The X server
-# undoes the hide of any client that dies, so the fresh one below is what
-# actually hides the cursor from now on.
-if command -v pkill >/dev/null 2>&1; then
-  pkill -x unclutter-xfixes 2>/dev/null || true
-elif command -v pgrep >/dev/null 2>&1; then
-  for pid in $(pgrep -x unclutter-xfixes 2>/dev/null); do kill "${pid}" 2>/dev/null || true; done
-fi
-
-exec unclutter-xfixes --start-hidden --fork
+exec "${RETROBOX_MOUSE_CURSOR_X11:-$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/mouse-cursor-x11}" hide

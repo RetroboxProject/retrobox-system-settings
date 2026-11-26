@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+# pylint: disable=invalid-name  # a command, named like the other libexec scripts
+"""Hides and shows the X11 mouse cursor for good (the Retrobox Openbox session).
+
+    mouse-cursor-x11 hide      hide it until `show` (or the X server) says so
+    mouse-cursor-x11 show      let it back
+    mouse-cursor-x11 status    print "hidden" or "shown"
+
+The X server (XFixes) hides the cursor for as long as the client that asked
+for it stays connected, whatever the pointer does: a touchscreen tap or a
+mouse that moves does not bring it back. That is the difference with
+unclutter, which shows the cursor again on every motion (and for its timeout
+after a tap on a touchscreen). `hide` therefore leaves a small process behind
+holding the connection, and `show` ends it. Standalone: copy it anywhere (a
+retrohook, say); it needs python3 and the X libraries that every X session has.
+"""
+import ctypes
+import ctypes.util
+import os
+import signal
+import sys
+import time
+
+PIDFILE = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "retrobox-mouse-cursor.pid")
+
+
+def _load(name):
+    path = ctypes.util.find_library(name)
+    if not path:
+        sys.exit(f"mouse-cursor-x11: lib{name} is not installed")
+    return ctypes.CDLL(path)
+
+
+def _running():
+    """The pid of the process that is hiding the cursor, or 0."""
+    try:
+        with open(PIDFILE, encoding="ascii") as handle:
+            pid = int(handle.read().strip())
+        with open(f"/proc/{pid}/cmdline", "rb") as handle:
+            if b"mouse-cursor-x11" not in handle.read():
+                return 0
+        return pid
+    except (OSError, ValueError):
+        return 0
+
+
+def _stop():
+    pid = _running()
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+        for _ in range(50):
+            if not _running():
+                break
+            time.sleep(0.02)
+    try:
+        os.unlink(PIDFILE)
+    except OSError:
+        pass
+
+
+def _hold():
+    """The hider: connect, hide, and stay until told to leave."""
+    xlib, xfixes = _load("X11"), _load("Xfixes")
+    xlib.XOpenDisplay.restype = ctypes.c_void_p
+    xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    xlib.XDefaultRootWindow.restype = ctypes.c_ulong
+    xlib.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+    xlib.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    xlib.XPending.argtypes = [ctypes.c_void_p]
+    xfixes.XFixesHideCursor.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    display = xlib.XOpenDisplay(None)
+    if not display:
+        return None
+    xfixes.XFixesHideCursor(display, xlib.XDefaultRootWindow(display))
+    xlib.XSync(display, 0)
+    return display, xlib
+
+
+def hide():
+    """Start the process that hides the cursor, and return once it is hidden."""
+    _stop()
+    if not os.environ.get("DISPLAY"):
+        sys.exit("mouse-cursor-x11: no DISPLAY: not in an X session")
+    ready_read, ready_write = os.pipe()
+    if os.fork():
+        # the caller: waits until the cursor is really hidden
+        os.close(ready_write)
+        answer = os.read(ready_read, 1)
+        sys.exit(0 if answer == b"1" else 1)
+    os.close(ready_read)
+    os.setsid()
+    held = _hold()
+    os.write(ready_write, b"1" if held else b"0")
+    os.close(ready_write)
+    if not held:
+        os._exit(1)
+    display, xlib = held
+    with open(PIDFILE, "w", encoding="ascii") as handle:
+        handle.write(f"{os.getpid()}\n")
+    signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
+    for stream in (0, 1, 2):
+        os.close(stream)
+    # Stay connected. When the X server goes, Xlib ends this process itself.
+    while True:
+        xlib.XPending(ctypes.c_void_p(display))
+        time.sleep(30)
+
+
+def main():
+    """Run the action of the command line."""
+    action = sys.argv[1] if len(sys.argv) == 2 else ""
+    if action == "hide":
+        hide()
+    elif action == "show":
+        _stop()
+    elif action == "status":
+        print("hidden" if _running() else "shown")
+    else:
+        sys.exit(__doc__.split("\n\n")[1] if __doc__ else "usage")
+
+
+if __name__ == "__main__":
+    main()

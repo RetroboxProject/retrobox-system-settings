@@ -15,11 +15,11 @@ set -euo pipefail
 # shellcheck source=libexec/retrobox-common.sh
 source "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/retrobox-common.sh"
 
-# Hide the mouse cursor at session start (batocera's unclutter clone): the
-# console does not need the pointer. A missing unclutter is reported and
+# Hide the mouse cursor at session start (for good, not until the next motion): the
+# console does not need the pointer. A failure (no python3, no X) is reported and
 # left alone: the console runs with the cursor visible.
 "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/mouse-hide-x11" \
-  || echo "mouse cursor: hide failed (is unclutter installed?)"
+  || echo "mouse cursor: hide failed (see mouse-cursor-x11)"
 
 backend="$(get_retrobox_setting openbox compositor || true)"
 backend="${backend:-glx}"

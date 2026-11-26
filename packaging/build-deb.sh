@@ -255,12 +255,12 @@ build "${stage}" retrobox-session-labwc
 ## retrobox-session-openbox
 stage="$(new_package retrobox-session-openbox)"
 add "${stage}" bin/retrobox-openbox-session libexec/retrobox-openbox-autostart \
-  libexec/mouse-hide-x11 libexec/mouse-show-x11 share/openbox
+  libexec/mouse-hide-x11 libexec/mouse-show-x11 libexec/mouse-cursor-x11 share/openbox
 mkdir -p "${stage}/usr/share/xsessions"
 cp "${ROOT}/share/xsessions/retrobox-openbox.desktop" "${stage}/usr/share/xsessions/"
 command_link "${stage}" retrobox-openbox-session bin/retrobox-openbox-session
 control "${stage}" retrobox-session-openbox \
-  "retrobox-system-settings (= ${VERSION}), openbox, unclutter-xfixes" \
+  "retrobox-system-settings (= ${VERSION}), openbox, python3, libxfixes3" \
   "picom, pulseaudio-utils" \
   "Retrobox as the machine's only interface: Openbox session" \
   "An Openbox (X11) session for a display manager (retrobox-openbox), with" \
