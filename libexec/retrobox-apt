@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# retrobox-apt: the little apt-get that a Retrobox console's user may run as
+# root without a password (share/sudoers.d/retrobox-nopasswd), for the
+# installers of retrobox-core, which need the build dependencies of an emulator.
+#
+#   retrobox-apt update [-q|-qq]
+#   retrobox-apt install [-y] [-s] PACKAGE...
+#
+# Nothing else gets through: no other apt-get command or option, and a package
+# is a plain name (optionally NAME=VERSION or NAME:ARCH), never a path, a URL
+# or NAME/RELEASE. It can still install any package of the configured
+# repositories, so what it protects is the system from arbitrary commands as
+# root, not from the software the distribution offers.
+set -euo pipefail
+
+APT_GET=/usr/bin/apt-get
+NAME_RE='^[a-z0-9][a-z0-9+.:_=~-]*$'
+
+die() {
+    printf 'retrobox-apt: %s\n' "$*" >&2
+    exit 2
+}
+
+[[ $# -ge 1 ]] || die "usage: retrobox-apt update | install [-y] [-s] PACKAGE..."
+command="$1"
+shift
+
+# whatever the caller's environment says, apt reads its own configuration only
+unset APT_CONFIG LD_PRELOAD LD_LIBRARY_PATH
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export DEBIAN_FRONTEND=noninteractive
+
+simulate=0
+args=()
+packages=()
+for argument in "$@"; do
+    case "${command}:${argument}" in
+        update:-q | update:-qq) args+=("${argument}") ;;
+        install:-y) args+=(-y) ;;
+        install:-s) args+=(-s); simulate=1 ;;
+        install:-*) die "option not allowed: ${argument}" ;;
+        install:*)
+            [[ "${argument}" =~ ${NAME_RE} ]] || die "not a package name: ${argument}"
+            packages+=("${argument}")
+            ;;
+        *) die "not allowed: ${command} ${argument}" ;;
+    esac
+done
+
+case "${command}" in
+    update) exec "${APT_GET}" update "${args[@]}" ;;
+    install)
+        [[ ${#packages[@]} -gt 0 ]] || die "no package given"
+        # a simulation is read by its caller: the untranslated text
+        [[ "${simulate}" -eq 0 ]] || export LC_ALL=C LANGUAGE=C
+        exec "${APT_GET}" install "${args[@]}" -- "${packages[@]}"
+        ;;
+    *) die "not allowed: ${command}" ;;
+esac

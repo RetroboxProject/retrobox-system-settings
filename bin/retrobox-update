@@ -33,8 +33,10 @@
 # Runs itself through sudo when it is not root (EmulationStation's overlay
 # runs it through pkexec: retrobox-system-settings update). Sleep, shutdown
 # and the power button are held off while it runs. Configuration files
-# changed by hand are kept (dpkg's --force-confold). $GITHUB_TOKEN avoids
-# GitHub's rate limit for anonymous requests (sudo keeps it).
+# changed by hand are kept (dpkg's --force-confold). GitHub is read without
+# a token (its 60 anonymous requests an hour are plenty: one per repository).
+# On a Retrobox console sudo does not ask for a password for it
+# (/etc/sudoers.d/retrobox-nopasswd).
 set -euo pipefail
 
 SELF="$(readlink -f -- "${BASH_SOURCE[0]}")"
@@ -43,6 +45,7 @@ PRERELEASES=0
 NO_APT=0
 RECOMMENDS=1
 DOWNLOAD_ONLY=""
+ESCALATED=0
 SYSCONF="${RETROBOX_SYSCONFDIR:-/etc/retrobox}"
 # the shipped lists: the package's share/releases.d, or install.sh's copy
 LISTS_DIRS="${RETROBOX_RELEASES_DIRS:-${SELF_DIR}/../share/releases.d ${SELF_DIR}/releases.d}"
@@ -73,6 +76,7 @@ while [[ $# -gt 0 ]]; do
         --allow-prereleases) PRERELEASES=1; shift ;;
         --no-apt) NO_APT=1; shift ;;
         --no-recommends) RECOMMENDS=0; shift ;;
+        --escalated) ESCALATED=1; shift ;;
         --download-only) DOWNLOAD_ONLY="${2:?--download-only needs a directory}"; shift 2 ;;
         -h | --help) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
@@ -101,6 +105,18 @@ machine_updater() {
     done | tail -n 1
 }
 
+# root first, then the machine's own updater below runs as root too (so it never
+# asks for a password itself): sudo runs this very file, which a rule of sudoers
+# may allow without one. --download-only never goes through sudo, nor is it
+# accepted from it (it writes wherever it is told).
+if [[ -n "${DOWNLOAD_ONLY}" && -n "${SUDO_USER:-}" ]]; then
+    die "--download-only does not run as root through sudo"
+fi
+if [[ -z "${DOWNLOAD_ONLY}" && "${EUID}" -ne 0 ]]; then
+    [[ "${ESCALATED}" -eq 0 ]] || die "it needs root"
+    exec sudo -- "${SELF}" --escalated "${ARGS[@]}"
+fi
+
 if [[ "${NO_APT}" -eq 0 && -z "${DOWNLOAD_ONLY}" ]]; then
     updater="$(machine_updater)"
     if [[ -n "${updater}" ]]; then
@@ -112,11 +128,6 @@ if [[ "${NO_APT}" -eq 0 && -z "${DOWNLOAD_ONLY}" ]]; then
         [[ "${PRERELEASES}" -eq 0 ]] || flags+=(--allow-prereleases)
         exec "${updater}" "${flags[@]}"
     fi
-fi
-
-if [[ -z "${DOWNLOAD_ONLY}" && "${EUID}" -ne 0 ]]; then
-    [[ -z "${RETROBOX_UPDATE_SUDO:-}" ]] || die "it needs root"
-    exec sudo --preserve-env=GITHUB_TOKEN -- env RETROBOX_UPDATE_SUDO=1 "${SELF}" "${ARGS[@]}"
 fi
 
 if [[ -z "${DOWNLOAD_ONLY}" && -z "${RETROBOX_UPDATE_INHIBITED:-}" && -d /run/systemd/system ]] &&
@@ -162,9 +173,6 @@ lists() {
 api_get() {
     local -a headers=(-H "Accept: application/vnd.github+json")
     local body code
-    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-        headers+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
-    fi
     body="$(mktemp)"
     code="$(curl -sSL --retry 2 -o "${body}" -w '%{http_code}' "${headers[@]}" "$1")" || code="${code:-000}"
     if [[ "${code}" != 200 ]]; then
@@ -264,7 +272,7 @@ fetch() {
     local repo="$1" dir="$2" json tag kind sums_name sums name file package version installed expected
     shift 2
     local -a names=() chosen=() wanted=() listed=("$@")
-    json="$(release "${repo}")" || { warn "cannot read the releases of ${repo} (see above; GITHUB_TOKEN lifts the limit of 60 anonymous requests an hour)"; return 0; }
+    json="$(release "${repo}")" || { warn "cannot read the releases of ${repo} (see above; GitHub allows 60 anonymous requests an hour per address: try again later)"; return 0; }
     if [[ -z "${json}" ]]; then
         if [[ "${PRERELEASES}" -eq 1 ]]; then
             log "${repo}: no release with packages"

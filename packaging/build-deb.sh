@@ -92,7 +92,7 @@ build() {
 ## retrobox-system-settings
 stage="$(new_package retrobox-system-settings)"
 add "${stage}" bin/retrobox-system-settings bin/retrobox-xdp-dns bin/retrobox-update libexec/retrobox-polkit-rule \
-  libexec/retrobox-volume libexec/retrobox-common.sh libexec/retrobox-settings-helper share/releases.d
+  libexec/retrobox-volume libexec/retrobox-common.sh libexec/retrobox-settings-helper libexec/retrobox-apt share/releases.d
 # the polkit action of retrobox-settings-helper (Debian's keyboard and language, with pkexec)
 mkdir -p "${stage}/usr/share/polkit-1/actions"
 sed -e "s|@HELPER@|/${RETROBOX_PATH}/libexec/retrobox-settings-helper|" \
@@ -105,15 +105,29 @@ command_link "${stage}" retrobox-system-settings bin/retrobox-system-settings
 command_link "${stage}" retrobox-xdp-dns bin/retrobox-xdp-dns
 command_link "${stage}" retrobox-polkit-rule libexec/retrobox-polkit-rule
 command_link "${stage}" retrobox-update bin/retrobox-update
-# sudo's password prompt shows what is typed (an asterisk per character): a
-# conffile, which the administrator may remove; sudo ignores a file of
-# /etc/sudoers.d that is not 0440
+command_link "${stage}" retrobox-apt libexec/retrobox-apt
+# /etc/sudoers.d, both conffiles (the administrator may remove them; sudo
+# ignores a file that is not 0440): sudo's password prompt showing what is
+# typed (an asterisk per character), and no password for the retrobox group's
+# updates and package installs (retrobox-update, retrobox-apt)
 mkdir -p "${stage}/etc/sudoers.d"
-install -m 0440 "${ROOT}/share/sudoers.d/retrobox-pwfeedback" "${stage}/etc/sudoers.d/retrobox-pwfeedback"
-if command -v visudo >/dev/null 2>&1; then
-  visudo -cqf "${stage}/etc/sudoers.d/retrobox-pwfeedback" || { echo "build-deb: bad sudoers file" >&2; exit 1; }
+: >"${stage}/DEBIAN/conffiles"
+for rule in retrobox-pwfeedback retrobox-nopasswd; do
+  install -m 0440 "${ROOT}/share/sudoers.d/${rule}" "${stage}/etc/sudoers.d/${rule}"
+  if command -v visudo >/dev/null 2>&1; then
+    visudo -cqf "${stage}/etc/sudoers.d/${rule}" || { echo "build-deb: bad sudoers file ${rule}" >&2; exit 1; }
+  fi
+  printf '/etc/sudoers.d/%s\n' "${rule}" >>"${stage}/DEBIAN/conffiles"
+done
+# the group that sudoers.d/retrobox-nopasswd names; its members are the people
+# who play on this machine (nx-debian's image puts its user in it)
+maintainer_script "${stage}" postinst <<'SCRIPT'
+#!/bin/sh
+set -e
+if [ "$1" = configure ] && ! getent group retrobox >/dev/null 2>&1; then
+    addgroup --system retrobox >/dev/null 2>&1 || groupadd --system retrobox
 fi
-printf '/etc/sudoers.d/retrobox-pwfeedback\n' >"${stage}/DEBIAN/conffiles"
+SCRIPT
 control "${stage}" retrobox-system-settings "bash, systemd" \
   "retrobox-core, polkitd, pkexec, xkb-data, tzdata, wireplumber | pulseaudio-utils, curl, jq" \
   "Retrobox as the machine's only interface: common part" \
@@ -124,7 +138,9 @@ control "${stage}" retrobox-system-settings "bash, systemd" \
   "system's update with Retrobox's packages (the overlay's System page)," \
   "retrobox-polkit-rule, the polkit rule that lets the console's user do that," \
   "power off and reboot, and sudo's password prompt showing an asterisk per" \
-  "character typed (/etc/sudoers.d/retrobox-pwfeedback)."
+  "character typed (/etc/sudoers.d/retrobox-pwfeedback). The retrobox group" \
+  "runs retrobox-update and retrobox-apt (the installers' apt) as root without" \
+  "a password (/etc/sudoers.d/retrobox-nopasswd)."
 build "${stage}" retrobox-system-settings
 
 ## retrobox-session-labwc

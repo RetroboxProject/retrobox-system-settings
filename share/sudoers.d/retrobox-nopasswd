@@ -1,0 +1,12 @@
+# Installed by the retrobox-system-settings package (/etc/sudoers.d): the
+# members of the retrobox group (the console's user, whose own group it is)
+# update the system and install an emulator's build dependencies without
+# typing the password of sudo, with a controller in hand. Only these commands,
+# which belong to root and which the user cannot edit.
+# retrobox-update may not be asked for --download-only, which writes where it is
+# told to as root (the overlay and the console never use it through sudo).
+# Remove this file, or the user from the group, to get the password prompt back.
+Cmnd_Alias RETROBOX_UPDATE = /usr/bin/retrobox-update, /opt/retrobox/bin/retrobox-update
+Cmnd_Alias RETROBOX_UPDATE_DOWNLOAD = /usr/bin/retrobox-update *--download-only*, /opt/retrobox/bin/retrobox-update *--download-only*
+Cmnd_Alias RETROBOX_APT = /usr/bin/retrobox-apt, /opt/retrobox/libexec/retrobox-apt
+%retrobox ALL=(root) NOPASSWD: RETROBOX_UPDATE, !RETROBOX_UPDATE_DOWNLOAD, RETROBOX_APT
