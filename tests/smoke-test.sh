@@ -583,6 +583,10 @@ openbox_session || fail "the Openbox session failed: $(cat "${HOME}/.local/state
 [[ "$(head -n 2 "${OB_LOG}")" == $'hook 10\nhook 20' ]] || fail "session.d hooks: $(cat "${OB_LOG}")"
 grep -q "^openbox --config-file ${OB}/run/retrobox-openbox-rc.xml --startup ${ROOT}/libexec/retrobox-openbox-autostart\$" "${OB_LOG}" || fail "openbox not started right: $(cat "${OB_LOG}")"
 grep -q "${ROOT}/libexec/retrobox-volume up" "${OB}/run/retrobox-openbox-rc.xml" || fail "@LIBEXEC@ not filled in"
+grep -q '<application class="\*" type="normal">' "${OB}/run/retrobox-openbox-rc.xml" &&
+  grep -q '<decor>no</decor>' "${OB}/run/retrobox-openbox-rc.xml" &&
+  grep -q '<fullscreen>yes</fullscreen>' "${OB}/run/retrobox-openbox-rc.xml" || fail "windows do not open fullscreen and without borders"
+python3 -c 'import sys, xml.dom.minidom as m; m.parse(sys.argv[1])' "${OB}/run/retrobox-openbox-rc.xml" || fail "Openbox's rc.xml is not valid XML"
 grep -qx 'picom -b --config /dev/null --backend glx --vsync' "${OB_LOG}" && grep -qx 'retrobox --console' "${OB_LOG}" || fail "autostart: $(cat "${OB_LOG}")"
 grep -qx 'mouse-cursor hide' "${OB_LOG}" || fail "the mouse cursor is not hidden at session start: $(cat "${OB_LOG}")"
 : >"${OB_LOG}"

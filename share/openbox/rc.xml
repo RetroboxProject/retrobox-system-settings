@@ -4,6 +4,10 @@
      ask to configure a keyboard when it saw them) and does what they say:
      the volume through retrobox-volume (Retrobox's overlay when it is there),
      the power key is left to logind (it only must not reach EmulationStation).
+     Every window an app opens is fullscreen and without borders, as in
+     Batocera: a console has no desktop to show around it. Only the "normal"
+     windows: dialogs, menus and splash screens keep their size, and
+     override-redirect windows (Retrobox's overlay) are never Openbox's.
      A machine's own rc.xml goes in /etc/retrobox/openbox/. -->
 <openbox_config xmlns="http://openbox.org/3.4/rc">
   <keyboard>
@@ -18,4 +22,11 @@
     </keybind>
     <keybind key="XF86PowerOff"/>
   </keyboard>
+  <applications>
+    <application class="*" type="normal">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <focus>yes</focus>
+    </application>
+  </applications>
 </openbox_config>
